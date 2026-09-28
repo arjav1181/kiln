@@ -16,6 +16,7 @@ const TARGETS: Record<string, string> = {
   scaffold: '08-scaffold.ts',
   image: '09-image-injection.ts',
   remote: '10-git-remote.ts',
+  hitrate: '11-t0-hitrate.ts',
 };
 
 const requested = process.argv.slice(2);
