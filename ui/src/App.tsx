@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, subscribe, type AppState, type ElementReport } from './api.ts';
+import { api, subscribe, type AppState, type ElementReport, type PublishTarget, type RemoteStatus } from './api.ts';
 import './styles.css';
 
 type ToolCall = { id: string; name: string; input?: unknown; isError?: boolean };
@@ -27,6 +27,10 @@ export default function App() {
   const [notice, setNotice] = useState<{ kind: string; text: string } | null>(null);
   const [devCommand, setDevCommand] = useState('');
   const [selection, setSelection] = useState<{ report: ElementReport | null; kilnId: string | null; html: string } | null>(null);
+  const [remote, setRemote] = useState<RemoteStatus | null>(null);
+  const [publish, setPublish] = useState<PublishTarget | null>(null);
+  const [repoUrl, setRepoUrl] = useState('');
+  const [tab, setTab] = useState<'history' | 'publish'>('history');
   const scrollRef = useRef<HTMLDivElement>(null);
   const frameKey = useRef(0);
 
@@ -38,6 +42,8 @@ export default function App() {
 
   useEffect(() => {
     void api.state().then(setState);
+    void api.remote().then(setRemote).catch(() => {});
+    void api.publishTarget().then(setPublish).catch(() => {});
 
     return subscribe((event) => {
       switch (event.kind) {
@@ -283,6 +289,94 @@ export default function App() {
             </div>
           )}
 
+          <div className="section tabs">
+            <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}>
+              History
+            </button>
+            <button className={tab === 'publish' ? 'tab active' : 'tab'} onClick={() => setTab('publish')}>
+              Publish
+            </button>
+          </div>
+
+          {tab === 'publish' ? (
+            <div className="section" style={{ overflowY: 'auto' }}>
+              <h2>Ship it</h2>
+              {publish && (
+                <>
+                  <div className="checkpoint">
+                    <span className="msg">{publish.label}</span>
+                    <span className="badge">{publish.kind}</span>
+                  </div>
+                  <div className="empty">{publish.detail}</div>
+                </>
+              )}
+
+              {publish && publish.kind !== 'container' && (
+                <button
+                  style={{ width: '100%', marginBottom: 12 }}
+                  onClick={() => void api.writePublishScaffold().then(() => setNotice({ kind: 'info', text: 'Dockerfile written' }))}
+                >
+                  Write a Dockerfile
+                </button>
+              )}
+
+              <h2 style={{ marginTop: 16 }}>GitHub</h2>
+              {remote?.configured ? (
+                <>
+                  <div className="files">{remote.url}</div>
+                  <div className="checkpoint">
+                    <span className="msg">
+                      {remote.ahead} ahead · {remote.behind} behind
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button
+                      style={{ flex: 1 }}
+                      disabled={busy || remote.ahead === 0}
+                      onClick={() => void api.push().then(() => {
+                        void api.remote().then(setRemote);
+                        setNotice({ kind: 'info', text: 'Pushed' });
+                      })}
+                    >
+                      Push
+                    </button>
+                    <button
+                      className="primary"
+                      style={{ flex: 1 }}
+                      disabled={busy || !remote.ghAuthed}
+                      title={remote.ghAuthed ? '' : 'Sign in with the gh CLI first'}
+                      onClick={() => void api.openPullRequest().then((r) => {
+                        setNotice({ kind: 'info', text: `Pull request: ${r.url}` });
+                      })}
+                    >
+                      Pull request
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="empty">
+                    Connect a git remote. Kiln pushes its own branch, never your main, so
+                    the agent's work stays reviewable.
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="git@github.com:you/repo.git"
+                      value={repoUrl}
+                      onChange={(e) => setRepoUrl(e.target.value)}
+                    />
+                    <button
+                      disabled={!repoUrl.trim()}
+                      onClick={() => void api.connectRemote(repoUrl.trim()).then(setRemote)}
+                    >
+                      Connect
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
           <div className="section" style={{ maxHeight: 260, overflowY: 'auto' }}>
             <h2>History</h2>
             {(state?.checkpoints ?? []).length === 0 && <div className="empty">No checkpoints yet.</div>}
@@ -299,6 +393,7 @@ export default function App() {
               </div>
             ))}
           </div>
+          )}
         </div>
       </div>
 

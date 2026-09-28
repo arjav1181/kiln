@@ -15,6 +15,7 @@ const TARGETS: Record<string, string> = {
   e2e: '07-end-to-end.ts',
   scaffold: '08-scaffold.ts',
   image: '09-image-injection.ts',
+  remote: '10-git-remote.ts',
 };
 
 const requested = process.argv.slice(2);

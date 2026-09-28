@@ -192,6 +192,54 @@ export function createDaemon(app: App): {
       return;
     }
 
+    if (path === '/api/remote' && req.method === 'GET') {
+      await sendJson(res, 200, await app.remoteStatus());
+      return;
+    }
+
+    if (path === '/api/remote/connect' && req.method === 'POST') {
+      const body = await readBody(req);
+      try {
+        await sendJson(res, 200, await app.connectRemote(String(body.url ?? '')));
+      } catch (error) {
+        await sendJson(res, 400, { error: (error as Error).message });
+      }
+      return;
+    }
+
+    if (path === '/api/remote/push' && req.method === 'POST') {
+      try {
+        await sendJson(res, 200, await app.push());
+      } catch (error) {
+        await sendJson(res, 400, { error: (error as Error).message });
+      }
+      return;
+    }
+
+    if (path === '/api/remote/pr' && req.method === 'POST') {
+      const body = await readBody(req);
+      try {
+        await sendJson(res, 200, await app.openPullRequest(body.title as string, body.body as string));
+      } catch (error) {
+        await sendJson(res, 400, { error: (error as Error).message });
+      }
+      return;
+    }
+
+    if (path === '/api/publish' && req.method === 'GET') {
+      await sendJson(res, 200, await app.publishTarget());
+      return;
+    }
+
+    if (path === '/api/publish/scaffold' && req.method === 'POST') {
+      try {
+        await sendJson(res, 200, await app.writePublishScaffold());
+      } catch (error) {
+        await sendJson(res, 400, { error: (error as Error).message });
+      }
+      return;
+    }
+
     if (path === '/api/inspect' && req.method === 'POST') {
       const body = await readBody(req);
       const report = app.browser ? await inspect(app, String(body.selector ?? '')) : null;

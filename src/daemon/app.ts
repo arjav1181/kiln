@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { Session, type PermissionRequest } from '../sdk/session.ts';
 import { createKilnServer, type ConsoleReport, type ElementReport, type KilnDeps, type PreviewState } from '../sdk/tools.ts';
 import type { KilnEvent, PermissionDecision } from '../sdk/events.ts';
-import { History, type Checkpoint } from '../project/history.ts';
+import { git, History, type Checkpoint } from '../project/history.ts';
+import { Remote, summariseBranch, type RemoteStatus } from '../project/remote.ts';
+import { detectPublish, writeDockerfile, type PublishTarget } from '../runtime/publish.ts';
 import { startDevServer, type DevServer } from '../runtime/manager.ts';
 import { needsInstall, planInstall, runInstall } from '../runtime/deps.ts';
 import { createProxy } from '../proxy/server.ts';
@@ -46,6 +48,7 @@ type TurnRecord = {
 export class App {
   readonly dir: string;
   readonly history: History;
+  readonly remote: Remote;
   readonly policy = new InjectionPolicy();
   #options: AppOptions;
 
@@ -71,6 +74,7 @@ export class App {
     this.#options = options;
     this.dir = options.dir;
     this.history = new History(options.dir);
+    this.remote = new Remote(options.dir, this.history.branch);
   }
 
   get previewUrl(): string {
@@ -271,6 +275,58 @@ export class App {
     await this.#proxy?.close();
     this.#server?.stop();
     await this.#browser?.close();
+  }
+
+  // ---- publishing ------------------------------------------------------
+
+  async remoteStatus(): Promise<RemoteStatus> {
+    return this.remote.status();
+  }
+
+  async connectRemote(url: string): Promise<RemoteStatus> {
+    return this.remote.connect(url);
+  }
+
+  async push(): Promise<unknown> {
+    return this.remote.push();
+  }
+
+  /**
+   * Pushes the branch and opens a reviewable pull request. The base defaults to
+   * the project's main branch, so an agent's work never lands unreviewed.
+   */
+  async openPullRequest(title?: string, body?: string): Promise<{ url: string; number: number | null }> {
+    const status = await this.remote.status();
+    if (!status.url) throw new Error('Connect a repository before opening a pull request.');
+
+    const base = await this.#defaultBase();
+    const summary = await summariseBranch(this.dir, base, this.history.branch);
+    return this.remote.createPullRequest({
+      title: title?.trim() || summary.title,
+      body: body?.trim() || summary.body,
+      base,
+    });
+  }
+
+  async #defaultBase(): Promise<string> {
+    const branches = (await git(['branch', '-r', '--format=%(refname:short)'], this.dir).catch(() => ''))
+      .split('\n')
+      .map((line) => line.trim().replace(/^origin\//, ''))
+      .filter(Boolean);
+    return branches.find((name) => /^(main|master)$/.test(name)) ?? 'main';
+  }
+
+  async publishTarget(): Promise<PublishTarget> {
+    return detectPublish(this.dir);
+  }
+
+  async writePublishScaffold(): Promise<{ path: string; target: PublishTarget }> {
+    const target = await detectPublish(this.dir);
+    if (!target.dockerfile) {
+      throw new Error(`${target.label}: ${target.detail}`);
+    }
+    const path = await writeDockerfile(this.dir, target.dockerfile);
+    return { path, target };
   }
 
   // ---- agent -----------------------------------------------------------

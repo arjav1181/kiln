@@ -18,6 +18,24 @@ export type AppState = {
   lastError: string | null;
 };
 
+export type RemoteStatus = {
+  configured: boolean;
+  url: string | null;
+  branch: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  hasGh: boolean;
+  ghAuthed: boolean;
+  repo: string | null;
+};
+
+export type PublishTarget = {
+  kind: 'static' | 'node' | 'container' | 'unsupported';
+  label: string;
+  detail: string;
+};
+
 export type ElementReport = {
   selector: string;
   tag: string;
@@ -55,6 +73,19 @@ export const api = {
 
   setDevCommand: (command: string) =>
     post<{ ok: boolean; preview: AppState['preview'] }>('/api/dev-command', { command }),
+
+  remote: () => fetch('/api/remote').then((r) => r.json() as Promise<RemoteStatus>),
+
+  connectRemote: (url: string) => post<RemoteStatus>('/api/remote/connect', { url }),
+
+  push: () => post<{ url: string; branch: string }>('/api/remote/push', {}),
+
+  openPullRequest: () => post<{ url: string; number: number | null }>('/api/remote/pr', {}),
+
+  publishTarget: () => fetch('/api/publish').then((r) => r.json() as Promise<PublishTarget>),
+
+  writePublishScaffold: () =>
+    post<{ path: string; target: PublishTarget }>('/api/publish/scaffold', {}),
 
   inspect: (selector: string) =>
     post<{ report: ElementReport | null }>('/api/inspect', { selector }).then((r) => r.report),
