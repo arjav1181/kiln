@@ -44,7 +44,7 @@ async function exercise(label: string, dir: string): Promise<Outcome> {
     clientServer.listen(0, '127.0.0.1', () => resolve((clientServer.address() as { port: number }).port));
   });
 
-  const proxy = createProxy({ host: '127.0.0.1', port: server.port, clientUrl: `http://127.0.0.1:${clientPort}/client.js` });
+  const proxy = createProxy({ host: '127.0.0.1', port: server.port, client: { origin: `http://127.0.0.1:${clientPort}` } });
   const proxyPort = await proxy.listen(0);
 
   try {

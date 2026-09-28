@@ -3,16 +3,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export type ElementReport = {
-  selector: string;
-  tag: string;
-  attributes: Record<string, string>;
-  outerHTML: string;
-  accessibleName: string | null;
-  rect: { x: number; y: number; width: number; height: number };
-  domPath: string;
-};
-
 const CHROME = process.env.KILN_CHROME ?? '/repl/tools/bin/chromium';
 
 async function freePort(): Promise<number> {
@@ -49,6 +39,7 @@ export type Browser = {
   goto: (url: string) => Promise<void>;
   evaluate: <T>(expression: string) => Promise<T>;
   enableConsole: (sink: (entry: ConsoleEntry) => void) => void;
+  screenshot: () => Promise<string>;
   close: () => Promise<void>;
 };
 
@@ -175,43 +166,17 @@ export async function launchBrowser(): Promise<Browser> {
     await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
   };
 
+  const screenshot = async (): Promise<string> => {
+    const frame = (await send('Page.captureScreenshot', { format: 'png' })) as { data?: string };
+    if (!frame.data) throw new Error('screenshot failed');
+    return frame.data;
+  };
+
   const enableConsole = (sink: (entry: ConsoleEntry) => void) => {
     consoleSink = sink;
     void send('Log.enable').catch(() => {});
   };
 
-  return { goto, evaluate, enableConsole, close };
+  return { goto, evaluate, enableConsole, screenshot, close };
 }
 
-const INSPECT = `
-(() => {
-  const el = document.querySelector(SEL);
-  if (!el) return null;
-  const name = el.getAttribute('aria-label')
-    || (el.id && document.querySelector('label[for="' + CSS.escape(el.id) + '"]')?.textContent)
-    || el.textContent?.trim()
-    || el.getAttribute('title')
-    || null;
-  const r = el.getBoundingClientRect();
-  const parts = [];
-  for (let n = el; n && n.nodeType === 1 && n !== document.body; n = n.parentElement) {
-    parts.unshift(n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + (n.className && typeof n.className === 'string' ? '.' + n.className.trim().split(/\\s+/).join('.') : ''));
-  }
-  const attributes = {};
-  for (const a of el.attributes) attributes[a.name] = a.value;
-  return {
-    selector: $(sel),
-    tag: el.tagName.toLowerCase(),
-    attributes,
-    outerHTML: el.outerHTML.slice(0, 600),
-    accessibleName: name,
-    rect: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) },
-    domPath: parts.join(' > '),
-  };
-})()
-`;
-
-export async function inspectElement(page: Browser, selector: string): Promise<ElementReport | null> {
-  const expression = INSPECT.replaceAll('SEL', JSON.stringify(selector)).replace('$(sel)', JSON.stringify(selector));
-  return page.evaluate<ElementReport | null>(expression);
-}

@@ -4,28 +4,39 @@ import type { Duplex } from 'node:stream';
 export type ProxyOptions = {
   host: string;
   port: number;
-  /** Absolute URL of the client script injected into every HTML response. */
-  clientUrl: string;
-  onInject?: (html: string) => string;
+  /**
+   * Mutable so the daemon can publish its origin once it is listening. The
+   * client script is served from the proxy's own origin, which keeps the script
+   * same-origin with the page it instruments.
+   */
+  client: { origin: string };
 };
+
+const CLIENT_PATH = '/__kiln/client.js';
 
 const HTML_TYPES = /^(text\/html|application\/xhtml\+xml)/i;
 
 const INJECTED_CLIENT = `
 (() => {
-  const state = window.__kiln = { ready: true, stack: null, at: Date.now() };
-  const params = new URLSearchParams(location.search);
-  state.stack = params.get('__kiln_stack') || null;
-  console.debug('[kiln] client injected');
+  const origin = __KILN_ORIGIN__;
+  const state = window.__kiln = { ready: true, origin, at: Date.now() };
   document.documentElement.dataset.kiln = '1';
+  console.debug('[kiln] client injected');
+  window.addEventListener('error', (e) => {
+    fetch(origin + '/__kiln/report', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ level: 'pageerror', text: String(e.message) }),
+    }).catch(() => {});
+  });
 })();
 `.trim();
 
 /** Headers that would break the preview once we sit in front of it. */
 const STRIPPED = ['content-length', 'content-encoding', 'x-frame-options', 'content-security-policy'];
 
-function injectIntoHead(html: string, clientUrl: string): string {
-  const tag = `<script src="${clientUrl}" defer></script>`;
+function injectIntoHead(html: string): string {
+  const tag = `<script src="${CLIENT_PATH}" defer></script>`;
   const head = html.match(/<head[^>]*>/i);
   if (head?.index !== undefined) {
     const at = head.index + head[0].length;
@@ -47,23 +58,26 @@ function upgradeResponse(res: { statusCode?: number; statusMessage?: string; raw
 }
 
 export function createProxy(options: ProxyOptions) {
-  const { host, port, clientUrl } = options;
+  const { host, port } = options;
   // Upgraded sockets outlive the request, so they have to be tracked
   // explicitly or close() leaves them holding the port.
   const upgraded = new Set<Duplex>();
 
   const server = createServer((req, res) => {
+    const path = (req.url ?? '/').split('?')[0] ?? '/';
+
+    if (path === CLIENT_PATH) {
+      res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(INJECTED_CLIENT.replace('__KILN_ORIGIN__', JSON.stringify(options.client.origin)));
+      return;
+    }
+
     const upstream = httpRequest(
       { host, port, path: req.url, method: req.method, headers: { ...req.headers, host: `${host}:${port}` } },
       (upstreamRes) => {
         const type = String(upstreamRes.headers['content-type'] ?? '');
         const headers = { ...upstreamRes.headers };
         for (const name of STRIPPED) delete headers[name];
-
-        const respond = (body: Buffer) => {
-          res.writeHead(upstreamRes.statusCode ?? 502, headers);
-          res.end(body);
-        };
 
         if (!HTML_TYPES.test(type)) {
           res.writeHead(upstreamRes.statusCode ?? 502, headers);
@@ -75,10 +89,8 @@ export function createProxy(options: ProxyOptions) {
         upstreamRes.on('data', (c: Buffer) => chunks.push(c));
         upstreamRes.on('end', () => {
           const original = Buffer.concat(chunks).toString('utf8');
-          const rewritten = options.onInject
-            ? options.onInject(original)
-            : injectIntoHead(original, clientUrl);
-          respond(Buffer.from(rewritten, 'utf8'));
+          res.writeHead(upstreamRes.statusCode ?? 502, headers);
+          res.end(Buffer.from(injectIntoHead(original), 'utf8'));
         });
       },
     );
@@ -134,4 +146,4 @@ export function createProxy(options: ProxyOptions) {
   };
 }
 
-export { INJECTED_CLIENT, injectIntoHead };
+export { INJECTED_CLIENT, injectIntoHead, CLIENT_PATH };

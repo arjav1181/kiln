@@ -12,6 +12,7 @@ const TARGETS: Record<string, string> = {
   runtime: '04-runtime-proxy.ts',
   t0: '05-t0-inspect.ts',
   t1: '06-provenance.ts',
+  e2e: '07-end-to-end.ts',
 };
 
 const requested = process.argv.slice(2);

@@ -22,6 +22,9 @@ const PORT_IN_URL = /:(\d{2,5})\b/;
 // Plenty of servers announce a bare host:port with no scheme, e.g. Go's
 // `listening on 127.0.0.1:5277`.
 const BARE_HOST_PORT = /\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})\b/;
+// Others announce only the number, e.g. `listening on 44919`. Anchoring on the
+// surrounding words keeps this from matching unrelated digits.
+const ANNOUNCED_PORT = /\b(?:port|listening on|listening at|address|bound to|now on)\b[^\d]{0,12}(\d{2,5})\b/i;
 // Dev servers colour their output even when piped, and the escapes land inside
 // the URL, so strip before matching.
 const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
@@ -35,7 +38,11 @@ function announcedPort(line: string): number | null {
   const url = line.match(URL_IN_LOG)?.[0];
   const fromUrl = url?.match(PORT_IN_URL)?.[1];
   if (fromUrl) return Number(fromUrl);
-  const bare = line.match(BARE_HOST_PORT)?.[1];
+
+  const host = line.match(BARE_HOST_PORT)?.[1];
+  if (host) return Number(host);
+
+  const bare = line.match(ANNOUNCED_PORT)?.[1];
   return bare ? Number(bare) : null;
 }
 

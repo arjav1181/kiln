@@ -34,15 +34,8 @@ export type PreviewState = {
   framework: string | null;
 };
 
-export type ElementReport = {
-  selector: string;
-  tag: string;
-  attributes: Record<string, string>;
-  outerHTML: string;
-  accessibleName: string | null;
-  rect: { x: number; y: number; width: number; height: number };
-  sourceHint: string | null;
-};
+export type { ElementReport } from '../capture/element.ts';
+import type { ElementReport } from '../capture/element.ts';
 
 export interface KilnDeps {
   preview(): PreviewState;

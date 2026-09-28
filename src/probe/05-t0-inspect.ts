@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { field, log, startProbe, verdict, withTempProject } from './harness.ts';
 import { startDevServer } from '../runtime/manager.ts';
 import { createProxy, INJECTED_CLIENT } from '../proxy/server.ts';
-import { launchBrowser, inspectElement } from '../capture/browser.ts';
+import { launchBrowser } from '../capture/browser.ts';
+import { inspectElement } from '../capture/element.ts';
 import { createServer } from 'node:http';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -25,7 +26,7 @@ const clientPort = await new Promise<number>((resolve) => {
 });
 
 const server = await startDevServer({ cwd: goFixture, readyTimeoutMs: 60_000 });
-const proxy = createProxy({ host: '127.0.0.1', port: server.port, clientUrl: `http://127.0.0.1:${clientPort}/client.js` });
+const proxy = createProxy({ host: '127.0.0.1', port: server.port, client: { origin: `http://127.0.0.1:${clientPort}` } });
 const proxyPort = await proxy.listen(0);
 const browser = await launchBrowser();
 let ok = false;

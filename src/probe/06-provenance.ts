@@ -58,7 +58,7 @@ try {
   proxy = createProxy({
     host: '127.0.0.1',
     port: server.port,
-    clientUrl: `http://127.0.0.1:${clientPort}/client.js`,
+    client: { origin: `http://127.0.0.1:${clientPort}` },
   });
   const proxyPort = await proxy.listen(0);
   const upstream = server.url;
