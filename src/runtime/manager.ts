@@ -1,0 +1,150 @@
+import { type ChildProcess, spawn } from 'node:child_process';
+import { detectDevServer, type DevTarget } from './detect.ts';
+
+export type DevServer = {
+  url: string;
+  port: number;
+  framework: string;
+  logs: () => string[];
+  stop: () => void;
+};
+
+export type StartOptions = {
+  cwd: string;
+  /** Overrides detection. This is how an unrecognised stack still works. */
+  target?: { command: string; args?: string[] };
+  readyTimeoutMs?: number;
+  onLog?: (line: string) => void;
+};
+
+const URL_IN_LOG = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?/i;
+const PORT_IN_URL = /:(\d{2,5})\b/;
+// Plenty of servers announce a bare host:port with no scheme, e.g. Go's
+// `listening on 127.0.0.1:5277`.
+const BARE_HOST_PORT = /\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})\b/;
+// Dev servers colour their output even when piped, and the escapes land inside
+// the URL, so strip before matching.
+const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function announcedPort(line: string): number | null {
+  const url = line.match(URL_IN_LOG)?.[0];
+  const fromUrl = url?.match(PORT_IN_URL)?.[1];
+  if (fromUrl) return Number(fromUrl);
+  const bare = line.match(BARE_HOST_PORT)?.[1];
+  return bare ? Number(bare) : null;
+}
+
+async function isServing(url: string, timeoutMs = 2000): Promise<boolean> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual' });
+    return response.status < 500;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolves the port once something actually answers, preferring a URL the
+ * process announced over our guesses, and verifying either before returning.
+ */
+async function waitForServing(
+  announced: () => number | null,
+  candidates: number[],
+  isDead: () => boolean,
+  timeoutMs: number,
+): Promise<number | null> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (isDead()) return null;
+
+    const claimed = announced();
+    if (claimed !== null && (await isServing(`http://127.0.0.1:${claimed}/`))) return claimed;
+
+    for (const port of candidates) {
+      if (await isServing(`http://127.0.0.1:${port}/`)) return port;
+    }
+
+    await sleep(250);
+  }
+
+  return null;
+}
+
+export async function startDevServer(options: StartOptions): Promise<DevServer> {
+  const { cwd, onLog } = options;
+  const readyTimeoutMs = options.readyTimeoutMs ?? 90_000;
+
+  const detected: DevTarget | null = options.target
+    ? { ...options.target, args: options.target.args ?? [], framework: 'user', ports: [] }
+    : await detectDevServer(cwd);
+
+  if (!detected) {
+    throw new Error(
+      'Could not work out how to run this project. Kiln needs a dev command, ' +
+        'for example `npm run dev`.',
+    );
+  }
+
+  const lines: string[] = [];
+  let announced: number | null = null;
+
+  const child: ChildProcess = spawn(detected.command, detected.args, {
+    cwd,
+    env: { ...process.env, BROWSER: 'none', NO_COLOR: '1', FORCE_COLOR: '0' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // Dev servers spawn children (npm -> vite); kill the group so we never
+    // leave an orphan holding the port.
+    detached: true,
+  });
+
+  let dead = false;
+  child.on('exit', () => {
+    dead = true;
+  });
+
+  const killTree = () => {
+    if (child.pid === undefined || dead) return;
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      child.kill('SIGTERM');
+    }
+  };
+
+  const record = (chunk: Buffer) => {
+    for (const raw of chunk.toString().split('\n')) {
+      const text = raw.replace(ANSI, '').trim();
+      if (!text) continue;
+      lines.push(text);
+      onLog?.(text);
+      if (announced !== null) continue;
+      const port = announcedPort(text);
+      if (port !== null) announced = port;
+    }
+  };
+
+  child.stdout?.on('data', record);
+  child.stderr?.on('data', record);
+
+  const port = await waitForServing(() => announced, detected.ports, () => dead, readyTimeoutMs);
+
+  if (port === null) {
+    const command = `${detected.command} ${detected.args.join(' ')}`.trim();
+    killTree();
+    throw new Error(
+      `Dev server (${command}) did not start serving within ${readyTimeoutMs / 1000}s.\n\n` +
+        lines.slice(-15).join('\n'),
+    );
+  }
+
+  return {
+    url: `http://127.0.0.1:${port}`,
+    port,
+    framework: detected.framework,
+    logs: () => [...lines],
+    stop: killTree,
+  };
+}

@@ -1,0 +1,11 @@
+{
+  "name": "kiln-fixture-vite",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5199 --strictPort"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
