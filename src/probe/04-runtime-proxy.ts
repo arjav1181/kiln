@@ -1,7 +1,8 @@
 import { field, log, verdict } from './harness.ts';
 import { detectDevServer } from '../runtime/detect.ts';
 import { startDevServer } from '../runtime/manager.ts';
-import { createProxy, INJECTED_CLIENT } from '../proxy/server.ts';
+import { createProxy } from '../proxy/server.ts';
+import { INJECTED_CLIENT } from '../proxy/client-script.ts';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

@@ -7,6 +7,7 @@ import { createKilnServer, type ConsoleReport, type ElementReport, type KilnDeps
 import type { KilnEvent, PermissionDecision } from '../sdk/events.ts';
 import { History, type Checkpoint } from '../project/history.ts';
 import { startDevServer, type DevServer } from '../runtime/manager.ts';
+import { needsInstall, planInstall, runInstall } from '../runtime/deps.ts';
 import { createProxy } from '../proxy/server.ts';
 import { launchBrowser, type Browser, type ConsoleEntry } from '../capture/browser.ts';
 import { inspectElement } from '../capture/element.ts';
@@ -60,6 +61,7 @@ export class App {
   #questions = new PendingRegistry<string>();
   #turns: TurnRecord[] = [];
   #busy = false;
+  #reconciling = false;
   #cost = 0;
   #lastError: string | null = null;
   #console: ConsoleEntry[] = [];
@@ -133,11 +135,11 @@ export class App {
     if (target) {
       this.#proxy = createProxy({
         host: '127.0.0.1',
-        port: this.#server!.port,
+        port: target.port,
         client: this.#proxyClient,
       });
       this.#proxyPort = await this.#proxy.listen(0);
-      this.#emit({ kind: 'preview', url: this.previewUrl, framework: this.#server!.framework });
+      this.#emit({ kind: 'preview', url: this.previewUrl, framework: target.framework });
     }
 
     if (!this.#options.headless) {
@@ -159,20 +161,71 @@ export class App {
    * as "scaffold", then one entry per turn, instead of folding the whole project
    * into the first real change.
    */
+  /**
+   * Brings the preview up once the project is servable.
+   *
+   * This is what makes an empty directory work: the first turn scaffolds the
+   * project, and the preview appears as soon as there is something to serve.
+   * An already-running server is left alone, because restarting it would throw
+   * away the agent's HMR state mid-turn.
+   */
+  async reconcilePreview(): Promise<boolean> {
+    if (this.#server) return true;
+    if (this.#reconciling) return false;
+
+    this.#reconciling = true;
+    try {
+      await this.#installDependencies();
+      const started = await this.#startPreview();
+      if (!started) return false;
+      await this.#rewireProxy();
+      if (this.#browser && this.#proxyPort) await this.#browser.goto(this.previewUrl);
+      this.#emit({ kind: 'preview', url: this.previewUrl, framework: started.framework });
+      return true;
+    } finally {
+      this.#reconciling = false;
+    }
+  }
+
+  /**
+   * A scaffolded project has no dependencies installed, and nobody should have
+   * to know that. Install before serving, and tell the agent what happened.
+   */
+  async #installDependencies(): Promise<void> {
+    const plan = planInstall(this.dir);
+    if (!plan || !needsInstall(this.dir, plan)) return;
+
+    this.#emit({ kind: 'deps.starting', manager: plan.manager });
+    const result = await runInstall(this.dir, plan, (line) =>
+      this.#emit({ kind: 'server.log', line }),
+    );
+    this.#emit({
+      kind: 'deps.done',
+      manager: plan.manager,
+      ok: result.ok,
+      detail: result.ok ? '' : result.output.split('\n').slice(-5).join(' | '),
+    });
+    if (!result.ok) this.#lastError = `Installing ${plan.manager} dependencies failed`;
+  }
+
   async checkpointScaffold(): Promise<void> {
     if (!(await this.history.isDirty())) return;
     await this.history.commit({ promptUuid: 'scaffold', message: 'Project scaffold', costUsd: 0 });
   }
 
-  async #startPreview(): Promise<boolean> {
+  async #startPreview(): Promise<DevServer | null> {
     try {
-      this.#server = await startDevServer({ cwd: this.dir, onLog: (line) => this.#emit({ kind: 'server.log', line }) });
-      return true;
+      const server = await startDevServer({
+        cwd: this.dir,
+        onLog: (line) => this.#emit({ kind: 'server.log', line }),
+      });
+      this.#server = server;
+      return server;
     } catch (error) {
       // An unrecognised stack is not fatal: the user can type a dev command.
       this.#lastError = (error as Error).message;
       this.#server = null;
-      return false;
+      return null;
     }
   }
 
@@ -311,6 +364,10 @@ export class App {
     const record = this.#turns.find((t) => t.promptUuid === promptUuid);
     const message = record?.message ?? '';
 
+    // The first turn may have turned an empty directory into a servable
+    // project, so the preview gets a chance to come up before we capture.
+    await this.reconcilePreview();
+
     const checkpoint = await this.history.commit({ promptUuid, message, costUsd });
     if (checkpoint && record) {
       record.files = checkpoint.files;
@@ -427,6 +484,8 @@ export type AppNotice =
   | { kind: 'preview.captured'; path: string; reason: string }
   | { kind: 'preview.skipped'; reason: string }
   | { kind: 'preview.log'; level: string; text: string }
+  | { kind: 'deps.starting'; manager: string }
+  | { kind: 'deps.done'; manager: string; ok: boolean; detail: string }
   | { kind: 'server.log'; line: string }
   | { kind: 'turn.done'; promptUuid: string; checkpointId: string | null; files: string[]; costUsd: number; isError: boolean; stopReason: string }
   | { kind: 'restored'; checkpointId: string }

@@ -1,5 +1,6 @@
 import { createServer, request as httpRequest } from 'node:http';
 import type { Duplex } from 'node:stream';
+import { INJECTED_CLIENT } from './client-script.ts';
 
 export type ProxyOptions = {
   host: string;
@@ -16,21 +17,7 @@ const CLIENT_PATH = '/__kiln/client.js';
 
 const HTML_TYPES = /^(text\/html|application\/xhtml\+xml)/i;
 
-const INJECTED_CLIENT = `
-(() => {
-  const origin = __KILN_ORIGIN__;
-  const state = window.__kiln = { ready: true, origin, at: Date.now() };
-  document.documentElement.dataset.kiln = '1';
-  console.debug('[kiln] client injected');
-  window.addEventListener('error', (e) => {
-    fetch(origin + '/__kiln/report', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ level: 'pageerror', text: String(e.message) }),
-    }).catch(() => {});
-  });
-})();
-`.trim();
+
 
 /** Headers that would break the preview once we sit in front of it. */
 const STRIPPED = ['content-length', 'content-encoding', 'x-frame-options', 'content-security-policy'];
@@ -146,4 +133,4 @@ export function createProxy(options: ProxyOptions) {
   };
 }
 
-export { INJECTED_CLIENT, injectIntoHead, CLIENT_PATH };
+export { injectIntoHead, CLIENT_PATH };

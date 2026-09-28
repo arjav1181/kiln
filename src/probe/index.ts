@@ -13,6 +13,7 @@ const TARGETS: Record<string, string> = {
   t0: '05-t0-inspect.ts',
   t1: '06-provenance.ts',
   e2e: '07-end-to-end.ts',
+  scaffold: '08-scaffold.ts',
 };
 
 const requested = process.argv.slice(2);

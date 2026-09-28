@@ -26,7 +26,7 @@ export default function App() {
   const [question, setQuestion] = useState<Question | null>(null);
   const [notice, setNotice] = useState<{ kind: string; text: string } | null>(null);
   const [devCommand, setDevCommand] = useState('');
-  const [selection, setSelection] = useState<ElementReport | null>(null);
+  const [selection, setSelection] = useState<{ report: ElementReport | null; kilnId: string | null; html: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const frameKey = useRef(0);
 
@@ -106,8 +106,11 @@ export default function App() {
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if ((event.data as { type?: string })?.type === 'kiln:select') {
-        void api.inspect((event.data as { selector: string }).selector).then(setSelection);
+      const data = event.data as { type?: string; selector?: string; kilnId?: string | null; outerHTML?: string };
+      if (data?.type === 'kiln:select' && data.selector) {
+        void api.inspect(data.selector).then((report) =>
+          setSelection({ report, kilnId: data.kilnId ?? null, html: data.outerHTML ?? '' }),
+        );
       }
     };
     window.addEventListener('message', onMessage);
@@ -251,13 +254,32 @@ export default function App() {
           {selection && (
             <div className="section">
               <h2>Selected</h2>
-              <div className="checkpoint">
-                <span className="msg">
-                  {selection.tag}#{selection.attributes.id ?? ''}
-                </span>
-                <button onClick={() => setSelection(null)}>clear</button>
-              </div>
-              <div className="files">{selection.domPath}</div>
+              {selection.report ? (
+                <>
+                  <div className="checkpoint">
+                    <span className="msg">
+                      {selection.report.tag}#{selection.report.attributes.id ?? ''}
+                    </span>
+                    <button onClick={() => setSelection(null)}>clear</button>
+                  </div>
+                  <div className="files">{selection.report.domPath}</div>
+                  {selection.kilnId && <div className="files">source id {selection.kilnId}</div>}
+                  <div className="files">{selection.report.accessibleName}</div>
+                </>
+              ) : (
+                <div className="empty">No matching element in the live page.</div>
+              )}
+              <button
+                style={{ marginTop: 8, width: '100%' }}
+                onClick={() => {
+                  const target = selection.report
+                    ? `${selection.report.tag}${selection.report.attributes.id ? '#' + selection.report.attributes.id : ''}`
+                    : 'the element I alt-clicked';
+                  setDraft(`Change ${target} so that `);
+                }}
+              >
+                Ask the agent to change it
+              </button>
             </div>
           )}
 
