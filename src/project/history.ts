@@ -106,7 +106,10 @@ export class History {
     await this.ensureIdentity();
 
     const before = (await git(['rev-parse', 'HEAD'], this.dir).catch(() => '')).trim();
-    await git(['add', '-A', '--', '.'], this.dir);
+    // No pathspec: `git add -A -- .` hard-fails when the pathspec resolves to a
+    // gitignored path, which a project inheriting a parent's .gitignore will.
+    await git(['config', 'advice.addIgnoredFile', 'false'], this.dir).catch(() => {});
+    await git(['add', '-A'], this.dir);
     if (!(await this.isDirty())) return null;
 
     const changed = await this.changedFiles();

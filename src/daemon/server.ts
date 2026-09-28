@@ -240,6 +240,37 @@ export function createDaemon(app: App): {
       return;
     }
 
+    if (path === '/api/select' && req.method === 'POST') {
+      const body = await readBody(req);
+      try {
+        const resolved = await app.resolveSelection({
+          selector: String(body.selector ?? ''),
+          kilnId: (body.kilnId as string | null) ?? null,
+        });
+        await sendJson(res, 200, resolved);
+      } catch (error) {
+        await sendJson(res, 400, { error: (error as Error).message });
+      }
+      return;
+    }
+
+    if (path === '/api/edit-instruction' && req.method === 'POST') {
+      const body = await readBody(req);
+      const instruction = await app.buildEditInstruction({
+        selector: String(body.selector ?? ''),
+        kilnId: (body.kilnId as string | null) ?? null,
+        intent: String(body.intent ?? ''),
+      });
+      if (!instruction) {
+        await sendJson(res, 404, {
+          error: 'That element has no source index yet. Try again once the dev server has compiled it.',
+        });
+        return;
+      }
+      await sendJson(res, 200, { instruction });
+      return;
+    }
+
     if (path === '/api/inspect' && req.method === 'POST') {
       const body = await readBody(req);
       const report = app.browser ? await inspect(app, String(body.selector ?? '')) : null;

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { Session, type PermissionRequest } from '../sdk/session.ts';
 import { createKilnServer, type ConsoleReport, type ElementReport, type KilnDeps, type PreviewState } from '../sdk/tools.ts';
 import type { KilnEvent, PermissionDecision } from '../sdk/events.ts';
@@ -14,6 +14,7 @@ import { createProxy } from '../proxy/server.ts';
 import { launchBrowser, type Browser, type ConsoleEntry } from '../capture/browser.ts';
 import { inspectElement } from '../capture/element.ts';
 import { InjectionPolicy, touchesUi } from '../injection/policy.ts';
+import { buildIndex, describeEdit, lookup, snippetFor, type ResolvedElement } from '../provenance/resolve.ts';
 import { PendingRegistry } from './requests.ts';
 
 export type AppOptions = {
@@ -58,6 +59,7 @@ export class App {
   #proxyPort = 0;
   #proxyClient = { origin: '' };
   #browser: Browser | null = null;
+  #provenance: Awaited<ReturnType<typeof buildIndex>> | null = null;
   #listeners = new Set<(event: KilnEvent | AppNotice) => void>();
 
   #permissions = new PendingRegistry<PermissionDecision>();
@@ -157,7 +159,51 @@ export class App {
       }
     }
 
+    await this.refreshProvenance();
     this.#emit({ kind: 'ready', dir: this.dir, preview: this.preview() });
+  }
+
+  /**
+   * Re-derives element ids from disk. Cheap, and it means a selection still
+   * resolves when no dev server is running.
+   */
+  async refreshProvenance(): Promise<number> {
+    this.#provenance = await buildIndex(this.dir);
+    return this.#provenance.byId.size;
+  }
+
+  /**
+   * Resolves a click to source. With transform-time ids available this is exact;
+   * without them the caller still gets the T0 element report and the agent
+   * locates the file itself.
+   */
+  async resolveSelection(input: { selector: string; kilnId: string | null }) {
+    // The DOM report is a nicety; an indexed id is the valuable part, so it
+    // resolves on its own even with no browser attached.
+    const indexed = input.kilnId && this.#provenance ? lookup(this.#provenance, input.kilnId) : null;
+    if (!indexed) {
+      return { report: await this.#inspect(input.selector), exact: null };
+    }
+
+    const resolved: ResolvedElement = {
+      id: indexed.id,
+      tag: indexed.tag,
+      attributes: indexed.attributes,
+      // Project-relative: the agent should be told where in its own project the
+      // element lives, not where it happens to sit on this machine.
+      file: relative(this.dir, indexed.file),
+      line: indexed.line,
+      column: indexed.column,
+      snippet: await snippetFor(indexed.file, indexed.line),
+    };
+    return { report: await this.#inspect(input.selector), exact: resolved };
+  }
+
+  /** Turns a resolved selection plus an intent into an unambiguous instruction. */
+  async buildEditInstruction(input: { selector: string; kilnId: string | null; intent: string }): Promise<string | null> {
+    const { exact } = await this.resolveSelection(input);
+    if (!exact) return null;
+    return describeEdit(exact, input.intent);
   }
 
   /**
@@ -423,6 +469,7 @@ export class App {
     // The first turn may have turned an empty directory into a servable
     // project, so the preview gets a chance to come up before we capture.
     await this.reconcilePreview();
+    await this.refreshProvenance().catch(() => {});
 
     const checkpoint = await this.history.commit({ promptUuid, message, costUsd });
     if (checkpoint && record) {

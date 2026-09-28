@@ -17,6 +17,7 @@ const TARGETS: Record<string, string> = {
   image: '09-image-injection.ts',
   remote: '10-git-remote.ts',
   hitrate: '11-t0-hitrate.ts',
+  editor: '12-click-to-edit.ts',
 };
 
 const requested = process.argv.slice(2);

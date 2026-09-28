@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, subscribe, type AppState, type ElementReport, type PublishTarget, type RemoteStatus } from './api.ts';
+import { api, subscribe, type AppState, type ElementReport, type PublishTarget, type RemoteStatus, type ResolvedElement } from './api.ts';
 import './styles.css';
 
 type ToolCall = { id: string; name: string; input?: unknown; isError?: boolean };
@@ -26,7 +26,12 @@ export default function App() {
   const [question, setQuestion] = useState<Question | null>(null);
   const [notice, setNotice] = useState<{ kind: string; text: string } | null>(null);
   const [devCommand, setDevCommand] = useState('');
-  const [selection, setSelection] = useState<{ report: ElementReport | null; kilnId: string | null; html: string } | null>(null);
+  const [selection, setSelection] = useState<{
+    report: ElementReport | null;
+    exact: ResolvedElement | null;
+    kilnId: string | null;
+  } | null>(null);
+  const [intent, setIntent] = useState('');
   const [remote, setRemote] = useState<RemoteStatus | null>(null);
   const [publish, setPublish] = useState<PublishTarget | null>(null);
   const [repoUrl, setRepoUrl] = useState('');
@@ -114,9 +119,10 @@ export default function App() {
     const onMessage = (event: MessageEvent) => {
       const data = event.data as { type?: string; selector?: string; kilnId?: string | null; outerHTML?: string };
       if (data?.type === 'kiln:select' && data.selector) {
-        void api.inspect(data.selector).then((report) =>
-          setSelection({ report, kilnId: data.kilnId ?? null, html: data.outerHTML ?? '' }),
-        );
+        void api.select(data.selector, data.kilnId ?? null).then((result) => {
+          setSelection({ report: result.report, exact: result.exact, kilnId: data.kilnId ?? null });
+          setIntent('');
+        });
       }
     };
     window.addEventListener('message', onMessage);
@@ -453,6 +459,29 @@ export default function App() {
   async function decide(requestId: string, allow: boolean, remember = false) {
     await api.answerPermission(requestId, allow, remember);
     setPermission(null);
+  }
+
+  /**
+   * Sends a structured instruction when the element is indexed exactly, and
+   * falls back to a plain description when it is not.
+   */
+  async function sendEdit(target: NonNullable<typeof selection>, want: string) {
+    if (!target.exact) {
+      const label = target.report
+        ? `<${target.report.tag}${target.report.attributes.id ? '#' + target.report.attributes.id : ''}> in the preview`
+        : 'the element I alt-clicked in the preview';
+      setDraft(`${label}: ${want}`);
+      setSelection(null);
+      return;
+    }
+    try {
+      const { instruction } = await api.editInstruction(target.report?.selector ?? '', target.kilnId, want);
+      setDraft(instruction);
+      setSelection(null);
+      setNotice({ kind: 'info', text: `Targeting ${target.exact.file}:${target.exact.line}` });
+    } catch (error) {
+      setState((s) => (s ? { ...s, lastError: (error as Error).message } : s));
+    }
   }
 
   async function answerQuestion(requestId: string, answer: string) {

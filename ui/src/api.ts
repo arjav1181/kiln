@@ -36,6 +36,18 @@ export type PublishTarget = {
   detail: string;
 };
 
+export type ResolvedElement = {
+  id: string;
+  tag: string;
+  attributes: Record<string, string>;
+  file: string;
+  line: number;
+  column: number;
+  snippet: string;
+};
+
+export type SelectionResult = { report: ElementReport | null; exact: ResolvedElement | null };
+
 export type ElementReport = {
   selector: string;
   tag: string;
@@ -86,6 +98,12 @@ export const api = {
 
   writePublishScaffold: () =>
     post<{ path: string; target: PublishTarget }>('/api/publish/scaffold', {}),
+
+  select: (selector: string, kilnId: string | null) =>
+    post<SelectionResult>('/api/select', { selector, kilnId }),
+
+  editInstruction: (selector: string, kilnId: string | null, intent: string) =>
+    post<{ instruction: string }>('/api/edit-instruction', { selector, kilnId, intent }),
 
   inspect: (selector: string) =>
     post<{ report: ElementReport | null }>('/api/inspect', { selector }).then((r) => r.report),
