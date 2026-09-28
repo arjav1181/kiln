@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import * as acorn from 'acorn';
 import acornJsx from 'acorn-jsx';
@@ -193,12 +193,13 @@ export function provenancePlugin(options: ProvenanceOptions = {}): ProvenancePlu
 
   const publish = () => {
     if (!options.outFile) return;
-    const payload = {
-      version: index.version,
-      elements: [...index.byId.values()],
-    };
+    const payload = JSON.stringify({ version: index.version, elements: [...index.byId.values()] }, null, 2);
+    // Write-then-rename: a reader polling this file must never observe a
+    // half-written snapshot.
+    const temp = `${options.outFile}.${process.pid}.tmp`;
     mkdirSync(dirname(options.outFile), { recursive: true });
-    writeFileSync(options.outFile, JSON.stringify(payload, null, 2));
+    writeFileSync(temp, payload);
+    renameSync(temp, options.outFile);
   };
 
   return {

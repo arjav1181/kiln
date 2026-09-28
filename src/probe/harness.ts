@@ -112,3 +112,18 @@ export function field(label: string, value: unknown): void {
 export function verdict(ok: boolean, label: string): void {
   log(`\n${ok ? 'PASS' : 'FAIL'}  ${label}`);
 }
+
+/** Polls until `predicate` holds or the deadline passes, then returns the last value. */
+export async function waitFor<T>(
+  read: () => Promise<T>,
+  predicate: (value: T) => boolean,
+  timeoutMs = 20_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (predicate(value)) return value;
+    if (Date.now() > deadline) return value;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}

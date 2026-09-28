@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 )
 
@@ -26,6 +27,13 @@ func main() {
 		// A real server would render; the point is the markup shape.
 		fmt.Fprint(w, page)
 	})
-	log.Println("listening on 127.0.0.1:5277")
-	log.Fatal(http.ListenAndServe("127.0.0.1:5277", nil))
+
+	// Bind an ephemeral port and announce it, so the probe never collides with
+	// a stale listener.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("listening on %s", listener.Addr())
+	log.Fatal(http.Serve(listener, nil))
 }

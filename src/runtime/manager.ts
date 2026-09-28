@@ -28,6 +28,9 @@ const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** How long to wait for the process to announce its port before guessing. */
+const ANNOUNCE_GRACE_MS = 12_000;
+
 function announcedPort(line: string): number | null {
   const url = line.match(URL_IN_LOG)?.[0];
   const fromUrl = url?.match(PORT_IN_URL)?.[1];
@@ -46,8 +49,11 @@ async function isServing(url: string, timeoutMs = 2000): Promise<boolean> {
 }
 
 /**
- * Resolves the port once something actually answers, preferring a URL the
- * process announced over our guesses, and verifying either before returning.
+ * Resolves the port once something actually answers.
+ *
+ * A URL the process announced always wins: guessing a port early can latch the
+ * preview onto an unrelated service already listening on 3000 or 8000. Guessed
+ * candidates are only tried once the announcement grace period has passed.
  */
 async function waitForServing(
   announced: () => number | null,
@@ -56,6 +62,7 @@ async function waitForServing(
   timeoutMs: number,
 ): Promise<number | null> {
   const deadline = Date.now() + timeoutMs;
+  const guessAfter = Date.now() + ANNOUNCE_GRACE_MS;
 
   while (Date.now() < deadline) {
     if (isDead()) return null;
@@ -63,8 +70,10 @@ async function waitForServing(
     const claimed = announced();
     if (claimed !== null && (await isServing(`http://127.0.0.1:${claimed}/`))) return claimed;
 
-    for (const port of candidates) {
-      if (await isServing(`http://127.0.0.1:${port}/`)) return port;
+    if (Date.now() >= guessAfter) {
+      for (const port of candidates) {
+        if (await isServing(`http://127.0.0.1:${port}/`)) return port;
+      }
     }
 
     await sleep(250);

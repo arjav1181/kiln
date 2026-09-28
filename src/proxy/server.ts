@@ -1,4 +1,5 @@
 import { createServer, request as httpRequest } from 'node:http';
+import type { Duplex } from 'node:stream';
 
 export type ProxyOptions = {
   host: string;
@@ -33,13 +34,23 @@ function injectIntoHead(html: string, clientUrl: string): string {
   return tag + html;
 }
 
+/**
+ * rawHeaders is a flat [name, value, ...] array, so it has to be re-paired into
+ * `Name: value` lines. Joining it directly produces a malformed handshake.
+ */
 function upgradeResponse(res: { statusCode?: number; statusMessage?: string; rawHeaders: string[] }): string {
-  const status = `HTTP/1.1 ${res.statusCode} ${res.statusMessage ?? 'Switching Protocols'}`;
-  return [status, ...res.rawHeaders, '', ''].join('\r\n');
+  const lines = [`HTTP/1.1 ${res.statusCode ?? 101} ${res.statusMessage ?? 'Switching Protocols'}`];
+  for (let i = 0; i < res.rawHeaders.length; i += 2) {
+    lines.push(`${res.rawHeaders[i]}: ${res.rawHeaders[i + 1]}`);
+  }
+  return `${lines.join('\r\n')}\r\n\r\n`;
 }
 
 export function createProxy(options: ProxyOptions) {
   const { host, port, clientUrl } = options;
+  // Upgraded sockets outlive the request, so they have to be tracked
+  // explicitly or close() leaves them holding the port.
+  const upgraded = new Set<Duplex>();
 
   const server = createServer((req, res) => {
     const upstream = httpRequest(
@@ -82,6 +93,12 @@ export function createProxy(options: ProxyOptions) {
   });
 
   server.on('upgrade', (req, socket, head) => {
+    // The browser tears these down abruptly on reload; without a handler the
+    // ECONNRESET becomes an unhandled error event and kills the daemon.
+    socket.on('error', () => socket.destroy());
+    upgraded.add(socket);
+    socket.on('close', () => upgraded.delete(socket));
+
     const upstream = httpRequest({
       host,
       port,
@@ -91,6 +108,7 @@ export function createProxy(options: ProxyOptions) {
     });
 
     upstream.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
+      upstreamSocket.on('error', () => socket.destroy());
       socket.write(upgradeResponse(upstreamRes));
       if (upstreamHead?.length) socket.unshift(upstreamHead);
       upstreamSocket.pipe(socket).pipe(upstreamSocket);
@@ -108,6 +126,8 @@ export function createProxy(options: ProxyOptions) {
       }),
     close: () =>
       new Promise<void>((resolve) => {
+        for (const socket of upgraded) socket.destroy();
+        upgraded.clear();
         server.closeAllConnections?.();
         server.close(() => resolve());
       }),

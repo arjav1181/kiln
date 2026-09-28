@@ -39,9 +39,16 @@ async function waitForDebugger(port: number, timeoutMs = 20_000): Promise<string
   throw new Error('Chrome DevTools endpoint did not come up');
 }
 
+export type ConsoleEntry = {
+  level: string;
+  text: string;
+  url?: string;
+};
+
 export type Browser = {
   goto: (url: string) => Promise<void>;
   evaluate: <T>(expression: string) => Promise<T>;
+  enableConsole: (sink: (entry: ConsoleEntry) => void) => void;
   close: () => Promise<void>;
 };
 
@@ -74,13 +81,45 @@ export async function launchBrowser(): Promise<Browser> {
 
   let nextId = 1;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  let consoleSink: ((entry: ConsoleEntry) => void) | null = null;
+
+  const describeRemote = (arg: unknown): string => {
+    if (arg === null || arg === undefined) return String(arg);
+    if (typeof arg === 'object') {
+      const record = arg as { value?: unknown; description?: string; unserializableValue?: string };
+      if ('value' in record) return JSON.stringify(record.value);
+      return record.description ?? record.unserializableValue ?? JSON.stringify(record);
+    }
+    return String(arg);
+  };
 
   socket.addEventListener('message', (event) => {
     const frame = JSON.parse(String(event.data)) as {
       id?: number;
+      method?: string;
+      params?: Record<string, unknown>;
       result?: unknown;
       error?: { message: string };
     };
+
+    if (frame.method === 'Runtime.consoleAPICalled' && frame.params) {
+      const args = (frame.params.args ?? []) as unknown[];
+      consoleSink?.({
+        level: String(frame.params.type ?? 'log'),
+        text: args.map(describeRemote).join(' '),
+        url: typeof frame.params.url === 'string' ? frame.params.url : undefined,
+      });
+    } else if (frame.method === 'Runtime.exceptionThrown' && frame.params) {
+      const details = frame.params.exceptionDetails as { text?: string; exception?: { description?: string } } | undefined;
+      consoleSink?.({
+        level: 'pageerror',
+        text: details?.exception?.description ?? details?.text ?? 'uncaught error',
+      });
+    } else if (frame.method === 'Log.entryAdded' && frame.params) {
+      const entry = frame.params.entry as { level?: string; text?: string; url?: string } | undefined;
+      consoleSink?.({ level: entry?.level ?? 'log', text: entry?.text ?? '', url: entry?.url });
+    }
+
     if (frame.id === undefined) return;
     const waiter = pending.get(frame.id);
     if (!waiter) return;
@@ -121,8 +160,7 @@ export async function launchBrowser(): Promise<Browser> {
     await new Promise((r) => setTimeout(r, 350));
   };
 
-  const close = async () => {
-    try {
+  const close = async () => {    try {
       socket.close();
     } catch {
       // already closed
@@ -137,7 +175,12 @@ export async function launchBrowser(): Promise<Browser> {
     await rm(userDataDir, { recursive: true, force: true }).catch(() => {});
   };
 
-  return { goto, evaluate, close };
+  const enableConsole = (sink: (entry: ConsoleEntry) => void) => {
+    consoleSink = sink;
+    void send('Log.enable').catch(() => {});
+  };
+
+  return { goto, evaluate, enableConsole, close };
 }
 
 const INSPECT = `

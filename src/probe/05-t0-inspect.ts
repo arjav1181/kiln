@@ -28,6 +28,7 @@ const server = await startDevServer({ cwd: goFixture, readyTimeoutMs: 60_000 });
 const proxy = createProxy({ host: '127.0.0.1', port: server.port, clientUrl: `http://127.0.0.1:${clientPort}/client.js` });
 const proxyPort = await proxy.listen(0);
 const browser = await launchBrowser();
+let ok = false;
 
 try {
   await browser.goto(`http://127.0.0.1:${proxyPort}/`);
@@ -71,13 +72,15 @@ try {
   field('line within 5 of truth', lineCorrect);
   field('cost', `$${turn.costUsd.toFixed(6)}`);
 
-  const ok = injected && report !== null && fileCorrect && lineCorrect;
+  ok = injected && report !== null && fileCorrect && lineCorrect;
   verdict(ok, 'm0.9 T0 click-to-inspect locates the source');
   await probe.session.close();
-  process.exit(ok ? 0 : 1);
 } finally {
   await browser.close();
   await proxy.close();
   server.stop();
   clientServer.close();
 }
+
+// Exit only after cleanup, so the port is released for the next probe.
+process.exit(ok ? 0 : 1);
