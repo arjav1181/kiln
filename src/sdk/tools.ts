@@ -52,7 +52,7 @@ export interface KilnDeps {
   askUser(question: string, choices: string[]): Promise<string>;
 }
 
-function createKilnServer(deps: KilnDeps): McpSdkServerConfigWithInstance {
+export function createKilnServer(deps: KilnDeps): McpSdkServerConfigWithInstance {
   return createSdkMcpServer({
     name: 'kiln',
     instructions:

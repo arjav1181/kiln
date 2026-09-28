@@ -76,7 +76,6 @@ export class Session {
 
   /** Mints the prompt uuid that `resumeSessionAt` later keys on. */
   async send(content: UserContent): Promise<string> {
-    await this.#readyPromise;
     const uuid = randomUUID();
     this.#turnId = uuid;
     this.#events.push({ kind: 'turn.start', turnId: uuid, promptUuid: uuid });
@@ -85,7 +84,7 @@ export class Session {
       message: { role: 'user', content: content as SDKUserMessage['message']['content'] },
       parent_tool_use_id: null,
       uuid,
-      session_id: this.#sessionId,
+      ...(this.#sessionId ? { session_id: this.#sessionId } : {}),
     });
     return uuid;
   }
