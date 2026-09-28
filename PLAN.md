@@ -2,6 +2,8 @@
 
 > Codename `kiln` (name TBD). Single npm package, single command, empty dir in → working app out.
 > **Any stack.** No fixed framework.
+>
+> M0 (the de-risking spike) is complete — 6/6 probes pass. See `FINDINGS.md`.
 
 ---
 
@@ -207,14 +209,20 @@ This policy must be an explicit, tested module — not an emergent behavior.
 
 ## 6. Phasing
 
-### M0 — De-risk spike (~3 days). Gates everything.
-Throwaway code, real findings.
-- `query()` + in-process MCP tool + `canUseTool` round-trip to a local UI
-- `resumeSessionAt` actually rolls the conversation **and** the files
-- **Proxy injection:** inject a client into a Vite dev server's HTML, and separately into a
-  *non-Node* server (Flask or Go) — proves §4.2 on two stacks
-- T0: click an element in a real page, capture DOM + a11y, have the agent name the right file/line
-- **T1 spike:** id injection survives HMR *and* survives the model rewriting the whole file
+### M0 — De-risk spike. **DONE — 6/6 pass.**
+
+Three gates, all green: `resumeSessionAt` forks the conversation (files stay put, so git
+owns file rollback); proxy instrumentation works on both Vite and Go; and T0 located
+`main.go:18` exactly from a click on a Go page. Nine real defects were found along the
+way, including a malformed WebSocket handshake that left HMR silently dead while every
+other test still passed. Full detail in `FINDINGS.md`.
+
+What M0 bought us, beyond confidence:
+
+- HMR survives the proxy, and the preview is same-origin — the overlay client needs no
+  postMessage handshake and no CORS handling.
+- T0 is a working provenance tier on day one, not a fallback.
+- The permission policy needs an explicit `mcp__kiln__` auto-allow rule.
 
 ### M1 — "blind agent gets eyes" (the MVP that justifies the product)
 CLI + daemon · session layer (claude-sdk backend only) · git checkpoints + rollback ·
@@ -238,19 +246,30 @@ Figma import · mobile toggle · deploy analytics · templates & fork · voice i
 
 ## 7. Risks, ranked
 
-1. **Context flood from the visual loop.** See §5. Mitigation is policy, not more cleverness.
-2. **T0 provenance hit rate.** If the agent routinely fails to find the right source, the
-   click-to-edit feature feels broken. Instrument it from day one; it drives the T2 roadmap.
-3. **Dev-server discovery across ecosystems.** Every ecosystem lies differently about its port
-   and readiness. The escape hatch (user types the command) is what keeps this from being a
-   bottomless pit — build the override UI early, not as a fallback.
-4. **SDK surface drift.** `@anthropic-ai/claude-agent-sdk` is `0.3.x`, pre-1.0, three days old.
-   *Mitigation:* pin the exact version and put a thin internal interface over it so swapping costs
-   one file. **This is the entire reason the backend adapter layer exists — do not collapse it.**
-5. **Backend parity.** Claude SDK ≫ ACP ≫ opencode ≫ codex. Ship *one* backend excellently; expose
-   the others as best-effort. Never advertise parity you don't have.
-6. **"Any stack" scope creep.** T2 is an infinite treadmill. The discipline that saves us: ship T0
-   for everything, T1 for the JSX family, and add T2 languages only against measured demand.
+M0 retired or reshaped several of these. The remainder, in order.
+
+1. **Context flood from the visual loop.** See §5. Unchanged by M0, still the biggest
+   quality risk. Mitigation is policy, not more cleverness.
+2. **T0 provenance hit rate.** Now *measured* at 1/1 on the hardest stack rather than
+   guessed. Still n=1. Instrument it properly in M1 and let the number set the T2
+   roadmap.
+3. **Dev-server discovery across ecosystems.** M0 hit three distinct failure modes
+   (colour codes inside URLs, scheme-less announcements, a read-before-announce race).
+   More will appear. The escape hatch — the user types the command — is what keeps this
+   from being bottomless, so build the override UI early, not as a fallback.
+4. **SDK surface drift.** `@anthropic-ai/claude-agent-sdk` is `0.3.x`, pre-1.0. Pinned
+   exactly, and the adapter layer keeps the blast radius to one file. **Do not collapse
+   that layer.**
+5. **The provenance index channel.** The plugin runs in the dev-server child process, so
+   the daemon cannot read the index in memory. M0 used a file with atomic writes; M1
+   should use a unix socket so the daemon is not polling the filesystem.
+6. **Backend parity.** Claude SDK ≫ ACP ≫ opencode ≫ codex. Ship *one* backend
+   excellently; expose the rest as best-effort. Never advertise parity you don't have.
+7. **"Any stack" scope creep.** T2 is an infinite treadmill. The discipline that saves
+   us: T0 for everything, T1 for the JSX family, T2 languages only against demand.
+8. **Unverified: image injection.** No probe confirmed the model receives an MCP image
+   block as an image. Standard MCP, but the visual loop depends on it and it is
+   untested. Verify early in M1.
 
 ---
 
