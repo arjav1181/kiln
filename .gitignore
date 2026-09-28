@@ -4,3 +4,4 @@ node_modules/
 .kiln/
 *.log
 .scratch/
+dist/
