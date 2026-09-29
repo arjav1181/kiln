@@ -12,8 +12,9 @@ import { createServer } from 'node:http';
 const here = dirname(fileURLToPath(import.meta.url));
 const goFixture = join(here, '..', '..', 'test', 'fixtures', 'go-app');
 
-// Ground truth for scoring the agent's answer.
-const TRUTH_FILE = 'main.go';
+// Ground truth for scoring the agent's answer. The markup lives in a template
+// file, which is where a real fix would go.
+const TRUTH_FILE = 'templates/signup.html';
 const TRUTH_NEEDLE = 'id="submit-btn"';
 const source = readFileSync(join(goFixture, TRUTH_FILE), 'utf8');
 const truthLine = source.split('\n').findIndex((line) => line.includes(TRUTH_NEEDLE)) + 1;
@@ -64,8 +65,9 @@ try {
   field('agent reply', turn.text.trim().slice(0, 200));
   field('ground truth', `${TRUTH_FILE}:${truthLine}`);
 
-  const gotFile = /FILE=\s*(\S+)/i.exec(turn.text)?.[1]?.replace(/^\.\//, '') ?? null;
-  const gotLine = Number(/LINE=\s*(\d+)/i.exec(turn.text)?.[1] ?? Number.NaN);
+  const answer = `${turn.result}\n${turn.text}`;
+  const gotFile = /FILE=\s*(\S+)/i.exec(answer)?.[1]?.replace(/^\.\//, '') ?? null;
+  const gotLine = Number(/LINE=\s*(\d+)/i.exec(answer)?.[1] ?? Number.NaN);
   const fileCorrect = gotFile === TRUTH_FILE;
   const lineCorrect = Number.isFinite(gotLine) && Math.abs(truthLine - gotLine) <= 5;
 

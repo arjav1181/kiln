@@ -34,6 +34,11 @@ try {
   }
   await git(['init', '-q'], work);
 
+  // Guard: this probe lets an agent edit files. If staging ever regresses it
+  // would rewrite the checked-in fixture, so assert the fixture is untouched.
+  const trackedFixture = join(fixture, 'src', 'App.jsx');
+  const fixtureBefore = await readFile(trackedFixture, 'utf8');
+
   const indexFile = join(work, '.kiln', 'provenance.json');
   process.env.KILN_PROVENANCE_PLUGIN = join(here, '..', 'provenance', 'plugin.ts');
   process.env.KILN_PROVENANCE_OUT = indexFile;
@@ -105,13 +110,26 @@ try {
 
   // And the agent can actually act on it.
   const project = app;
+  const tools: string[] = [];
+  let reply = '';
+  let stopReason: string | null = null;
+  let turnError = false;
   const turnDone = new Promise<string>((resolve) => {
     const off = project.subscribe((event) => {
+      if (event.kind === 'tool.start') tools.push(event.name);
+      if (event.kind === 'turn.end') {
+        stopReason = event.stopReason;
+        turnError = event.isError;
+      }
       if (event.kind === 'turn.done') {
         off();
         resolve(event.checkpointId ?? '');
       }
     });
+  });
+  const project2 = app;
+  void project2.subscribe((event) => {
+    if (event.kind === 'text') reply += event.delta;
   });
 
   await fetch(`${base}/api/prompt`, {
@@ -122,15 +140,24 @@ try {
   const checkpoint = await turnDone;
 
   const after = await readFile(join(work, 'src', 'App.jsx'), 'utf8');
+  field('tools the agent used', tools);
+  field('stop reason', stopReason ?? '(none)');
+  field('turn error', turnError);
+  field('agent said', reply.trim().slice(0, 300));
   field('agent applied the edit', /Send it/.test(after));
   field('turn checkpointed', Boolean(checkpoint));
   field('unrelated markup intact', after.includes('footer') && after.includes('<Footer />'));
+  const fixtureAfter = await readFile(trackedFixture, 'utf8');
+  const fixtureUntouched = fixtureAfter === fixtureBefore;
+  field('checked-in fixture untouched', fixtureUntouched);
+  if (!fixtureUntouched) throw new Error('the probe edited the tracked fixture');
 
   ok =
     Boolean(exact.exact) &&
     names.includes('App.jsx') &&
     /Send it/.test(after) &&
-    after.includes('<Footer />');
+    after.includes('<Footer />') &&
+    fixtureUntouched;
 
   log('');
   verdict(ok, 'm2 click-to-edit: select resolves to source and the agent applies it');

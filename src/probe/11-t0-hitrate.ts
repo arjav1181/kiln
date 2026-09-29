@@ -107,7 +107,9 @@ try {
   let lineHits = 0;
   log('');
   for (const hit of hits) {
-    const fileOk = hit.file === hit.expectedFile;
+    // The agent reports paths relative to wherever it is looking, so compare on
+    // the tail rather than demanding one exact spelling.
+    const fileOk = hit.file === hit.expectedFile || Boolean(hit.file?.endsWith(`/${hit.expectedFile}`));
     const lineOk = fileOk && hit.line !== null && Math.abs(hit.line - hit.expectedLine) <= 3;
     if (fileOk) fileHits += 1;
     if (lineOk) lineHits += 1;
