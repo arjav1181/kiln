@@ -1,19 +1,43 @@
 {
   "name": "kiln",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "A Lovable-grade product shell for terminal coding agents. One command turns an empty directory into a running app you can look at.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.6"
   },
+  "bin": {
+    "kiln": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "ui/dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "codex",
+    "opencode",
+    "lovable",
+    "scaffold",
+    "vibe-coding",
+    "terminal",
+    "devtools"
+  ],
   "scripts": {
-    "probe": "node src/probe/index.ts",
-    "typecheck": "tsc --noEmit",
-    "build": "npm run build:ui",
-    "build:ui": "vite build --config ui/vite.config.ts",
-    "start": "node src/cli.ts",
+    "start": "node dist/cli.js",
     "dev": "node src/cli.ts",
-    "check": "npm run typecheck && npm run build:ui"
+    "build": "npm run build:src && npm run build:ui",
+    "build:src": "tsc -p tsconfig.build.json",
+    "build:ui": "vite build --config ui/vite.config.ts",
+    "check": "npm run typecheck && npm run build",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build",
+    "probe": "node src/probe/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.283",
@@ -24,18 +48,12 @@
   "devDependencies": {
     "@types/acorn": "^4.0.6",
     "@types/node": "^24.0.0",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "typescript": "^7.0.2"
-  },
-  "bin": {
-    "kiln": "./src/cli.ts"
-  },
-  "files": [
-    "src",
-    "ui/dist"
-  ]
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  }
 }

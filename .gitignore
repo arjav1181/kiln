@@ -1,8 +1,10 @@
 node_modules/
+dist/
+ui/dist/
 .env
 .env.local
 .kiln/
 *.log
 .scratch/
-dist/
 .staged/
+*.tgz
