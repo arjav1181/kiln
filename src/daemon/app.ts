@@ -17,12 +17,23 @@ import { InjectionPolicy, touchesUi } from '../injection/policy.ts';
 import { buildIndex, describeEdit, lookup, snippetFor, type ResolvedElement } from '../provenance/resolve.ts';
 import { PendingRegistry } from './requests.ts';
 
+/**
+ * A turn that ends without calling a single tool, while the reply contains a
+ * tool-call marker, is a malformed turn: the model tried to act and the stream
+ * delivered the call as text.
+ */
+const TOOL_MARKER = /<[｜|]?.*?(?:tool_call|tool_use|invoke\s+name=|function call)|[｜|]{2}DSML[｜|]{2}/i;
+
+type TurnProgress = { text: string; tools: number };
+
 export type AppOptions = {
   dir: string;
   model?: string;
   /** Skip the browser; useful in headless environments and for tests. */
   headless?: boolean;
   autoApprove?: boolean;
+  /** Automatic retry for a turn that tried to act but called no tools. */
+  recoverMalformedTurns?: boolean;
 };
 
 export type AppState = {
@@ -67,6 +78,8 @@ export class App {
   #turns: TurnRecord[] = [];
   #busy = false;
   #reconciling = false;
+  #turn: TurnProgress = { text: '', tools: 0 };
+  #retries = 0;
   #cost = 0;
   #lastError: string | null = null;
   #console: ConsoleEntry[] = [];
@@ -398,6 +411,7 @@ export class App {
   async prompt(text: string): Promise<{ promptUuid: string }> {
     if (this.#busy) throw new Error('A turn is already running');
     this.#busy = true;
+    this.#retries = 0;
     this.#lastError = null;
     this.#emit({ kind: 'busy', busy: true });
 
@@ -445,7 +459,12 @@ export class App {
   async #pump(session: Session): Promise<void> {
     for await (const event of session.events) {
       this.#emit(event);
+      if (event.kind === 'text') this.#turn.text += event.delta;
+      if (event.kind === 'tool.start') this.#turn.tools += 1;
+      if (event.kind === 'turn.start') this.#turn = { text: '', tools: 0 };
+
       if (event.kind === 'turn.end') {
+        if (await this.#recoverMalformedTurn(session, event)) continue;
         this.#busy = false;
         this.#cost = event.costUsd;
         await this.#finishTurn(event.promptUuid, event.costUsd, event.isError, event.stopReason ?? '');
@@ -455,6 +474,35 @@ export class App {
         this.#emit({ kind: 'busy', busy: false });
       }
     }
+  }
+
+  /**
+   * Retries a turn that ended without acting. Deliberately narrow: only when
+   * the turn produced no tool calls at all *and* the reply carries a tool-call
+   * marker, and only once per user prompt, so a genuinely tool-free turn is
+   * never nudged into doing something the user did not ask for.
+   */
+  async #recoverMalformedTurn(
+    session: Session,
+    event: Extract<KilnEvent, { kind: 'turn.end' }>,
+  ): Promise<boolean> {
+    const recovery = this.#options.recoverMalformedTurns ?? true;
+    if (!recovery || this.#retries >= 1) return false;
+    if (this.#turn.tools > 0) return false;
+    if (event.stopReason !== 'end_turn' || event.isError) return false;
+    if (!TOOL_MARKER.test(this.#turn.text)) return false;
+
+    this.#retries += 1;
+    this.#emit({
+      kind: 'turn.retrying',
+      reason: 'the turn ended without running a tool',
+      attempt: this.#retries + 1,
+    });
+    await session.send(
+      'Your last message was cut off before you acted. Do not describe what you are ' +
+        'about to do — make the change now, then report the result.',
+    );
+    return true;
   }
 
   async #finishTurn(
@@ -591,6 +639,7 @@ export type AppNotice =
   | { kind: 'deps.done'; manager: string; ok: boolean; detail: string }
   | { kind: 'server.log'; line: string }
   | { kind: 'turn.done'; promptUuid: string; checkpointId: string | null; files: string[]; costUsd: number; isError: boolean; stopReason: string }
+  | { kind: 'turn.retrying'; reason: string; attempt: number }
   | { kind: 'restored'; checkpointId: string }
   | { kind: 'question'; requestId: string; question: string; choices: string[] }
   | { kind: 'permission'; requestId: string; toolName: string; input: unknown; title: string; description: string; canRemember: boolean };

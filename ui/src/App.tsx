@@ -99,6 +99,9 @@ export default function App() {
         case 'question':
           setQuestion({ requestId: event.requestId, question: event.question, choices: event.choices });
           break;
+        case 'turn.retrying':
+          setNotice({ kind: 'info', text: `Retrying (attempt ${event.attempt}): ${event.reason}` });
+          break;
         case 'preview.captured':
           setNotice({ kind: 'info', text: `Preview captured: ${event.reason}` });
           break;
