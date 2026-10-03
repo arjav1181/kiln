@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,14 +37,37 @@ type Result = { name: string; ok: boolean; ms: number };
 
 /** Gives teardown a chance to finish before the next probe claims resources. */
 async function settle(): Promise<void> {
-  await new Promise((r) => setTimeout(r, 2000));
+  await new Promise((r) => setTimeout(r, 1500));
+}
+
+/**
+ * Probes start dev servers and browsers. Rather than trust each one to clean
+ * up, the runner owns the whole process group: whatever survives a probe is
+ * killed before the next one starts. Orphaned dev servers otherwise starve the
+ * later probes and make them fail for reasons unrelated to what they test.
+ */
+function sweep(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 const run = (file: string): Promise<Result> =>
   new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [join(here, file)], { stdio: 'inherit' });
-    child.on('exit', (code) => resolve({ name: file.replace(/^\d+-|\.ts$/g, ''), ok: code === 0, ms: Date.now() - started }));
+    const child = spawn(process.execPath, [join(here, file)], { stdio: 'inherit', detached: true });
+    child.on('exit', (code) => {
+      sweep(child);
+      resolve({ name: file.replace(/^\d+-|\.ts$/g, ''), ok: code === 0, ms: Date.now() - started });
+    });
   });
 
 const results: Result[] = [];
