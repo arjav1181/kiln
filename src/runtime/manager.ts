@@ -149,13 +149,28 @@ export async function startDevServer(options: StartOptions): Promise<DevServer> 
     dead = true;
   });
 
+  // Signal the whole process group even if the direct child has already exited:
+  // `npm run vite` can exit while vite itself keeps holding the port.
   const killTree = () => {
-    if (child.pid === undefined || dead) return;
+    const pid = child.pid;
+    if (pid === undefined) return;
     try {
-      process.kill(-child.pid, 'SIGTERM');
+      process.kill(-pid, 'SIGTERM');
     } catch {
-      child.kill('SIGTERM');
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // Already gone.
+      }
     }
+    const escalate = setTimeout(() => {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        // Already gone, which is the common case.
+      }
+    }, 2000);
+    escalate.unref?.();
   };
 
   const record = (chunk: Buffer) => {

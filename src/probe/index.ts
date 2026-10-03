@@ -35,6 +35,11 @@ if (requested.length && selected.length !== requested.length) {
 
 type Result = { name: string; ok: boolean; ms: number };
 
+/** Gives teardown a chance to finish before the next probe claims resources. */
+async function settle(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 2000));
+}
+
 const run = (file: string): Promise<Result> =>
   new Promise((resolve) => {
     const started = Date.now();
@@ -46,8 +51,10 @@ const results: Result[] = [];
 for (const name of selected) {
   console.log(`\n${'='.repeat(64)}\n${name}\n${'='.repeat(64)}`);
   results.push(await run(TARGETS[name]!));
-  // Probes hold ports and browsers; give the OS a moment between them.
-  await new Promise((r) => setTimeout(r, 750));
+  // Probes hold ports, browsers and process groups. Let the OS reclaim them
+  // before the next one, or late probes fail for reasons that have nothing to
+  // do with what they are testing.
+  await settle();
 }
 
 console.log(`\n${'='.repeat(64)}\nsummary\n${'='.repeat(64)}`);

@@ -80,6 +80,7 @@ export class App {
   #reconciling = false;
   #turn: TurnProgress = { text: '', tools: 0 };
   #retries = 0;
+  #unhookExit: (() => void) | null = null;
   #cost = 0;
   #lastError: string | null = null;
   #console: ConsoleEntry[] = [];
@@ -173,7 +174,32 @@ export class App {
     }
 
     await this.refreshProvenance();
+    this.#hookExit();
     this.#emit({ kind: 'ready', dir: this.dir, preview: this.preview() });
+  }
+
+  /**
+   * A dev server that outlives the daemon keeps its port, which then blocks the
+   * next run. There is no way to run async teardown from a signal handler, so
+   * the process is torn down synchronously instead.
+   */
+  #hookExit(): void {
+    if (this.#unhookExit) return;
+    const bail = () => {
+      try {
+        this.#server?.stop();
+      } catch {
+        // Best effort; the process is going away.
+      }
+    };
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'exit'] as const) {
+      process.once(signal, bail);
+    }
+    this.#unhookExit = () => {
+      for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'exit'] as const) {
+        process.removeListener(signal, bail);
+      }
+    };
   }
 
   /**
@@ -328,6 +354,7 @@ export class App {
   }
 
   async stop(): Promise<void> {
+    this.#unhookExit?.();
     this.#permissions.clear();
     this.#questions.clear();
     await this.#session?.close().catch(() => {});
