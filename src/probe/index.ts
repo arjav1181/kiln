@@ -18,6 +18,7 @@ const TARGETS: Record<string, string> = {
   remote: '10-git-remote.ts',
   hitrate: '11-t0-hitrate.ts',
   editor: '12-click-to-edit.ts',
+  inject: '13-provenance-injection.ts',
 };
 
 const requested = process.argv.slice(2);

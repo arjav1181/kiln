@@ -52,8 +52,6 @@ let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null;
 let ok = false;
 
 try {
-  process.env.KILN_PROVENANCE_PLUGIN = pluginEntry;
-  process.env.KILN_PROVENANCE_OUT = indexFile;
   server = await startDevServer({ cwd: work, readyTimeoutMs: 90_000 });
 
   proxy = createProxy({

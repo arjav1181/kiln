@@ -1,20 +1,8 @@
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { defineConfig } from 'vite';
 
-// Probes stage a copy of this fixture outside the repo, so the plugin and the
-// index location are passed in rather than resolved relative to this file.
-const pluginEntry =
-  process.env.KILN_PROVENANCE_PLUGIN ??
-  new URL('../../../src/provenance/plugin.ts', import.meta.url).pathname;
-
-const { provenancePlugin } = await import(pluginEntry);
-
-const outFile =
-  process.env.KILN_PROVENANCE_OUT ??
-  join(dirname(fileURLToPath(import.meta.url)), '.kiln', 'provenance.json');
-
-export default {
-  plugins: [provenancePlugin({ outFile })],
+// Deliberately ordinary. Kiln adds its provenance plugin by wrapping this config
+// at run time, so nothing here should know Kiln exists.
+export default defineConfig({
   esbuild: { jsx: 'automatic' },
   server: { host: '127.0.0.1' },
-};
+});

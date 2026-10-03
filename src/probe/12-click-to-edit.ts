@@ -45,8 +45,6 @@ try {
   const trackedFixture = join(fixture, 'src', 'App.jsx');
   const fixtureBefore = await readFile(trackedFixture, 'utf8');
 
-  process.env.KILN_PROVENANCE_PLUGIN = join(here, '..', 'provenance', 'plugin.ts');
-  process.env.KILN_PROVENANCE_OUT = join(work, '.kiln', 'provenance.json');
 
   // Not headless: the ids come from the dev server compiling the page, which is
   // what happens when a user opens the preview.

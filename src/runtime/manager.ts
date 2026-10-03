@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { detectDevServer, type DevTarget } from './detect.ts';
+import { isVite, wrapViteConfig } from './vite.ts';
 
 export type DevServer = {
   url: string;
@@ -89,6 +90,18 @@ async function waitForServing(
   return null;
 }
 
+const RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+
+/**
+ * Appends arguments to a dev command. Package-manager runners swallow bare
+ * flags, so `npm run dev --config x` would never reach vite; the separator is
+ * what makes `npm run dev -- --config x` work.
+ */
+function withExtraArgs(command: string, args: string[], extra: string[]): string[] {
+  if (RUNNERS.has(command) && args[0] === 'run') return [...args, '--', ...extra];
+  return [...args, ...extra];
+}
+
 export async function startDevServer(options: StartOptions): Promise<DevServer> {
   const { cwd, onLog } = options;
   const readyTimeoutMs = options.readyTimeoutMs ?? 90_000;
@@ -104,10 +117,25 @@ export async function startDevServer(options: StartOptions): Promise<DevServer> 
     );
   }
 
+  let args = detected.args;
+  // Vite projects get Kiln's provenance plugin through a generated wrapper
+  // config, so the project itself is never modified and `npm run dev` keeps
+  // working normally without it.
+  if (!options.target && isVite(cwd)) {
+    try {
+      const wrap = await wrapViteConfig(cwd);
+      if (wrap) args = withExtraArgs(detected.command, args, wrap.args);
+    } catch (error) {
+      // Not fatal: without the wrapper the project still previews, it just
+      // falls back to source-search provenance.
+      options.onLog?.(`[kiln] provenance unavailable: ${(error as Error).message}`);
+    }
+  }
+
   const lines: string[] = [];
   let announced: number | null = null;
 
-  const child: ChildProcess = spawn(detected.command, detected.args, {
+  const child: ChildProcess = spawn(detected.command, args, {
     cwd,
     env: { ...process.env, BROWSER: 'none', NO_COLOR: '1', FORCE_COLOR: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -148,7 +176,7 @@ export async function startDevServer(options: StartOptions): Promise<DevServer> 
   const port = await waitForServing(() => announced, detected.ports, () => dead, readyTimeoutMs);
 
   if (port === null) {
-    const command = `${detected.command} ${detected.args.join(' ')}`.trim();
+    const command = `${detected.command} ${args.join(' ')}`.trim();
     killTree();
     throw new Error(
       `Dev server (${command}) did not start serving within ${readyTimeoutMs / 1000}s.\n\n` +
