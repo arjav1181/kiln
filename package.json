@@ -1,5 +1,5 @@
 {
-  "name": "kiln",
+  "name": "@arjav1181/kiln",
   "version": "0.1.0",
   "description": "A Lovable-grade product shell for terminal coding agents. One command turns an empty directory into a running app you can look at.",
   "license": "MIT",
@@ -55,5 +55,13 @@
     "react-dom": "^19.2.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arjav1181/kiln.git"
+  },
+  "homepage": "https://github.com/arjav1181/kiln",
+  "bugs": {
+    "url": "https://github.com/arjav1181/kiln/issues"
   }
 }

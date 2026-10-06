@@ -4,7 +4,7 @@ A Lovable-grade product shell for terminal coding agents. Single npm package, si
 command, empty directory in and a working app out — on whatever stack the project uses.
 
 ```bash
-npx kiln my-app
+npx @arjav1181/kiln my-app
 ```
 
 This is **M1**: a working vertical slice. The architecture and phasing live in `PLAN.md`;
@@ -26,6 +26,14 @@ src/project/       git checkpoints and restore
 ui/                React UI, built to ui/dist
 test/fixtures/     real projects: Vite, Go, JSX
 ```
+
+## Install
+
+```bash
+npx @arjav1181/kiln my-app
+```
+
+Or globally: `npm i -g @arjav1181/kiln && kiln my-app`.
 
 ## Probes
 
