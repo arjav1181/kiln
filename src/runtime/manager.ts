@@ -145,6 +145,18 @@ export async function startDevServer(options: StartOptions): Promise<DevServer> 
   });
 
   let dead = false;
+  // Without this, a missing binary (no npm, no npx) surfaces as an unhandled
+  // 'error' event instead of a message the user can act on.
+  const spawnError = new Promise<never>((_, reject) => {
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      dead = true;
+      reject(
+        error.code === 'ENOENT'
+          ? new Error(`\`${detected.command}\` is not installed or not on your PATH.`)
+          : error,
+      );
+    });
+  });
   child.on('exit', () => {
     dead = true;
   });
@@ -188,7 +200,10 @@ export async function startDevServer(options: StartOptions): Promise<DevServer> 
   child.stdout?.on('data', record);
   child.stderr?.on('data', record);
 
-  const port = await waitForServing(() => announced, detected.ports, () => dead, readyTimeoutMs);
+  const port = await Promise.race([
+    waitForServing(() => announced, detected.ports, () => dead, readyTimeoutMs),
+    spawnError,
+  ]);
 
   if (port === null) {
     const command = `${detected.command} ${args.join(' ')}`.trim();

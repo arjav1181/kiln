@@ -5,7 +5,7 @@ import { join, relative } from 'node:path';
 import { Session, type PermissionRequest } from '../sdk/session.ts';
 import { createKilnServer, type ConsoleReport, type ElementReport, type KilnDeps, type PreviewState } from '../sdk/tools.ts';
 import type { KilnEvent, PermissionDecision } from '../sdk/events.ts';
-import { git, History, type Checkpoint } from '../project/history.ts';
+import { git, gitAvailable, GitError, History, type Checkpoint } from '../project/history.ts';
 import { Remote, summariseBranch, type RemoteStatus } from '../project/remote.ts';
 import { detectPublish, writeDockerfile, type PublishTarget } from '../runtime/publish.ts';
 import { startDevServer, type DevServer } from '../runtime/manager.ts';
@@ -88,6 +88,7 @@ export class App {
   #turn: TurnProgress = { text: '', tools: 0 };
   #retries = 0;
   #unhookExit: (() => void) | null = null;
+  #historyOk = true;
   #cost = 0;
   #lastError: string | null = null;
   #console: ConsoleEntry[] = [];
@@ -121,7 +122,7 @@ export class App {
       dir: this.dir,
       preview: this.preview(),
       sessionId: this.#session?.sessionId ?? null,
-      checkpoints: await this.history.log(),
+      checkpoints: this.#historyOk ? await this.history.log() : [],
       costUsd: this.#cost,
       busy: this.#busy,
       lastError: this.#lastError,
@@ -156,8 +157,27 @@ export class App {
 
   async start(): Promise<void> {
     if (!existsSync(this.dir)) throw new Error(`No such directory: ${this.dir}`);
-    await this.history.init();
-    await this.checkpointScaffold();
+
+    // History is a feature, not a prerequisite. If git is missing or cannot
+    // use this directory, say so plainly and carry on without checkpoints.
+    this.#historyOk = await gitAvailable();
+    if (this.#historyOk) {
+      try {
+        await this.history.init();
+        await this.checkpointScaffold();
+      } catch (error) {
+        if (error instanceof GitError && error.fatal) {
+          this.#historyOk = false;
+          this.#lastError = `${error.message} — running without version history`;
+          this.#emit({ kind: 'history.disabled', reason: error.message });
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      this.#lastError = 'git is not available — running without version history';
+      this.#emit({ kind: 'history.disabled', reason: 'git is not installed' });
+    }
 
     const target = await this.#startPreview();
     if (target) {
@@ -470,6 +490,7 @@ export class App {
   }
 
   async restore(checkpointId: string): Promise<void> {
+    if (!this.#historyOk) throw new Error('Version history is unavailable in this project.');
     const checkpoints = await this.history.log();
     const target = checkpoints.find((c) => c.id === checkpointId);
     if (!target) throw new Error(`Unknown checkpoint ${checkpointId}`);
@@ -555,7 +576,9 @@ export class App {
     await this.reconcilePreview();
     await this.refreshProvenance().catch(() => {});
 
-    const checkpoint = await this.history.commit({ promptUuid, message, costUsd });
+    const checkpoint = this.#historyOk
+      ? await this.history.commit({ promptUuid, message, costUsd })
+      : null;
     if (checkpoint && record) {
       record.files = checkpoint.files;
       record.screenshot = await this.#maybeCapture(promptUuid, checkpoint.files, isError);
@@ -684,6 +707,7 @@ export type AppNotice =
   | { kind: 'server.log'; line: string }
   | { kind: 'turn.done'; promptUuid: string; checkpointId: string | null; files: string[]; costUsd: number; isError: boolean; stopReason: string }
   | { kind: 'turn.retrying'; reason: string; attempt: number }
+  | { kind: 'history.disabled'; reason: string }
   | { kind: 'restored'; checkpointId: string }
   | { kind: 'question'; requestId: string; question: string; choices: string[] }
   | { kind: 'permission'; requestId: string; toolName: string; input: unknown; title: string; description: string; canRemember: boolean };

@@ -18,11 +18,59 @@ const TRAILER = 'kiln-prompt';
 
 export class GitError extends Error {
   readonly output: string;
+  /** Whether this is a problem with the environment rather than the command. */
+  readonly fatal: boolean;
 
-  constructor(command: string, output: string) {
-    const first = output.split('\n').find((line) => line.trim().length > 0) ?? output;
-    super(`git ${command} failed: ${first.trim()}`);
+  constructor(command: string, output: string, code?: string) {
+    super(explain(command, output, code));
     this.output = output;
+    this.fatal = isEnvironmentProblem(output, code);
+  }
+}
+
+const KNOWN: Array<{ test: RegExp; message: string; fatal: boolean }> = [
+  {
+    test: /Author identity unknown|Please tell me who you are/i,
+    message:
+      'git has no user configured for this repository. Kiln sets a local identity ' +
+      'automatically, so this usually means the project directory is not writable.',
+    fatal: true,
+  },
+  {
+    test: /dubious ownership/i,
+    message:
+      "git does not trust this repository's owner. Run:\n" +
+      '  git config --global --add safe.directory <your-project-path>',
+    fatal: true,
+  },
+  {
+    test: /does not appear to be a git repository/i,
+    message: 'That directory is inside a git repository Kiln cannot use.',
+    fatal: true,
+  },
+];
+
+function explain(command: string, output: string, code?: string): string {
+  if (code === 'ENOENT') return 'git is not installed, or is not on your PATH.';
+
+  const known = KNOWN.find((entry) => entry.test.test(output));
+  if (known) return known.message;
+
+  const first = output.split('\n').find((line) => line.trim().length > 0) ?? '';
+  return first ? `git ${command} failed: ${first.trim()}` : `git ${command} failed`;
+}
+
+function isEnvironmentProblem(output: string, code?: string): boolean {
+  if (code === 'ENOENT') return true;
+  return KNOWN.some((entry) => entry.fatal && entry.test.test(output));
+}
+
+export async function gitAvailable(): Promise<boolean> {
+  try {
+    await run('git', ['--version'], { timeout: 5000 });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -33,7 +81,8 @@ export async function git(args: string[], cwd: string): Promise<string> {
   } catch (error) {
     const err = error as { stdout?: string; stderr?: string };
     const output = `${err.stdout ?? ''}${err.stderr ?? ''}`.trim();
-    throw new GitError(args.join(' '), output || 'git failed');
+    const code = (error as { code?: string }).code;
+    throw new GitError(args.join(' '), output, code);
   }
 }
 

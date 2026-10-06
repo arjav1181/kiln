@@ -59,9 +59,15 @@ try {
 
   // A real turn: the agent writes a file, and that becomes a checkpoint.
   const project = app;
+  let reply = '';
+  let stopReason: string | null = null;
   project.subscribe((event) => {
     if (event.kind === 'tool.start') log(`  tool  ${event.name}`);
     if (event.kind === 'fatal') log(`  fatal ${event.message}`);
+    if (event.kind === 'text') reply += event.delta;
+    if (event.kind === 'turn.end') stopReason = event.stopReason;
+    if (event.kind === 'deps.starting') log(`  deps  installing with ${event.manager}`);
+    if (event.kind === 'deps.done') log(`  deps  ${event.manager} ok=${event.ok} ${event.detail}`);
   });
 
   const turnDone = new Promise<string>((resolve) => {
@@ -88,6 +94,8 @@ try {
   const committed = await git(['show', '--name-only', '--format=', checkpointId], work).catch(() => '');
   field('file committed', committed.trim());
 
+  field('stop reason', stopReason ?? '(none)');
+  field('agent said', reply.trim().slice(0, 200));
   const after = (await (await fetch(`${base}/api/state`)).json()) as AppState;
   field('checkpoints listed', after.checkpoints.length);
   field('cost recorded', `$${after.costUsd.toFixed(4)}`);

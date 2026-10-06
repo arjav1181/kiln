@@ -104,6 +104,10 @@ export default function App() {
         case 'turn.retrying':
           setNotice({ kind: 'info', text: `Retrying (attempt ${event.attempt}): ${event.reason}` });
           break;
+        case 'history.disabled':
+          setState((s) => (s ? { ...s, lastError: event.reason } : s));
+          setNotice({ kind: 'info', text: `Version history off: ${event.reason}` });
+          break;
         case 'preview.captured':
           setNotice({ kind: 'info', text: `Preview captured: ${event.reason}` });
           break;
@@ -410,7 +414,13 @@ export default function App() {
           ) : (
           <div className="section" style={{ maxHeight: 260, overflowY: 'auto' }}>
             <h2>History</h2>
-            {(state?.checkpoints ?? []).length === 0 && <div className="empty">No checkpoints yet.</div>}
+            {(state?.checkpoints ?? []).length === 0 && (
+              <div className="empty">
+                {state?.lastError?.toLowerCase().includes('history')
+                  ? 'History is unavailable for this project.'
+                  : 'No checkpoints yet.'}
+              </div>
+            )}
             {[...(state?.checkpoints ?? [])].reverse().map((checkpoint, index, all) => (
               <div
                 key={checkpoint.id}
