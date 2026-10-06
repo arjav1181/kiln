@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, subscribe, type AppState, type ElementReport, type PublishTarget, type RemoteStatus, type ResolvedElement } from './api.ts';
+import { api, subscribe, type AppState, type ElementReport, type Outstanding, type PublishTarget, type RemoteStatus, type ResolvedElement } from './api.ts';
 import './styles.css';
 
 type ToolCall = { id: string; name: string; input?: unknown; isError?: boolean };
@@ -47,6 +47,7 @@ export default function App() {
 
   useEffect(() => {
     void api.state().then(setState);
+    void syncOutstanding();
     void api.remote().then(setRemote).catch(() => {});
     void api.publishTarget().then(setPublish).catch(() => {});
 
@@ -54,6 +55,7 @@ export default function App() {
       switch (event.kind) {
         case 'busy':
           setState((s) => (s ? { ...s, busy: event.busy } : s));
+          if (!event.busy) void syncOutstanding();
           break;
         case 'preview':
           setState((s) => (s ? { ...s, preview: { ...s.preview, url: event.url, framework: event.framework } } : s));
@@ -117,6 +119,26 @@ export default function App() {
       }
     });
   }, []);
+
+  // Prompts are events when they arrive, but state when the tab is reopened —
+  // otherwise closing the tab mid-permission loses it silently.
+  const syncOutstanding = async () => {
+    const pending = await api.outstanding();
+    for (const item of pending) {
+      if (item.kind === 'permission') {
+        setPermission({
+          requestId: item.requestId,
+          toolName: item.toolName,
+          input: item.input,
+          title: item.title,
+          description: item.description,
+          canRemember: item.canRemember,
+        });
+      } else {
+        setQuestion({ requestId: item.requestId, question: item.question, choices: item.choices });
+      }
+    }
+  };
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {

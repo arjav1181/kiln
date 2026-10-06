@@ -119,6 +119,11 @@ export function createDaemon(app: App): {
       return;
     }
 
+    if (path === '/api/outstanding' && req.method === 'GET') {
+      await sendJson(res, 200, { outstanding: (await app.state()).outstanding });
+      return;
+    }
+
     if (path === '/api/state' && req.method === 'GET') {
       await sendJson(res, 200, await app.state());
       return;
@@ -300,8 +305,30 @@ export function createDaemon(app: App): {
 
   return {
     listen(requested = 0) {
-      return new Promise<ServerHandle>((resolve) => {
+      return new Promise<ServerHandle>((resolve, reject) => {
+        // Without this, a busy port escapes as an unhandled 'error' event and
+        // takes the process down with a raw Node stack trace.
+        const onError = (error: NodeJS.ErrnoException) => {
+          server.removeListener('error', onError);
+          if (error.code === 'EADDRINUSE') {
+            reject(
+              new Error(
+                `Port ${requested} is already in use. Close whatever is using it, ` +
+                  'or pass a different one: kiln --port 3001',
+              ),
+            );
+            return;
+          }
+          if (error.code === 'EACCES') {
+            reject(new Error(`Not allowed to listen on port ${requested}. Try a port above 1024.`));
+            return;
+          }
+          reject(error);
+        };
+        server.on('error', onError);
+
         server.listen(requested, '127.0.0.1', () => {
+          server.removeListener('error', onError);
           port = (server.address() as { port: number }).port;
           resolve({
             port,

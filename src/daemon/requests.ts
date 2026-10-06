@@ -15,7 +15,7 @@ export class PendingRegistry<T> {
 
   readonly timeoutMs: number;
 
-  constructor(timeoutMs = 10 * 60_000) {
+  constructor(timeoutMs = 5 * 60_000) {
     this.timeoutMs = timeoutMs;
   }
 
@@ -28,6 +28,8 @@ export class PendingRegistry<T> {
         this.#entries.delete(id);
         resolve(undefined as T);
       }, this.timeoutMs);
+      // Deliberately unref'd above so a pending prompt never holds the process
+      // open; it still resolves the promise so the agent turn can finish.
       timer.unref?.();
       this.#entries.set(id, { id, resolve, createdAt: Date.now(), timer });
     });

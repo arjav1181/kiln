@@ -82,6 +82,10 @@ async function ensureKilnDir(dir: string): Promise<void> {
   }
 }
 
+function hasCredentials(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+}
+
 async function main(): Promise<void> {
   const options = parse(process.argv.slice(2));
   if (options.help) {
@@ -114,17 +118,29 @@ async function main(): Promise<void> {
       '',
       `  kiln  ${options.dir}`,
       `  ui      ${url}`,
-      `  preview ${preview.url ?? '(not running)'}`,
-      `  agent   ${app.history.branch} branch · ${detected}`,
+      `  preview ${preview.url ?? '(not running yet)'}`,
+      `  stack   ${detected}`,
       '',
     ].join('\n'),
   );
 
   if (preview.url) {
-    process.stdout.write(`  open the preview at ${preview.url}\n\n`);
+    process.stdout.write(`  Preview: ${preview.url}\n`);
   } else {
-    process.stdout.write('  no dev server yet — set one from the UI, or pass --dev "<command>"\n\n');
+    process.stdout.write(
+      '  Nothing to preview yet. Describe what you want and Kiln will create it,\n' +
+        '  or point it at an existing app with --dev "<command>".\n',
+    );
   }
+
+  if (!hasCredentials()) {
+    process.stdout.write(
+      '\n  Warning: no Anthropic credentials found. Kiln will start, but the agent\n' +
+        '  cannot run until ANTHROPIC_API_KEY is set or you sign in with `claude`.\n',
+    );
+  }
+
+  process.stdout.write(`\n  Open ${url}\n\n`);
 
   if (options.open) openBrowser(url);
 
@@ -143,5 +159,10 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
   process.stderr.write(`\n  kiln: ${(error as Error).message}\n\n`);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  process.stderr.write(`\n  kiln: ${reason instanceof Error ? reason.message : String(reason)}\n\n`);
   process.exit(1);
 });

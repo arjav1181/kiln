@@ -36,6 +36,10 @@ export type AppOptions = {
   recoverMalformedTurns?: boolean;
 };
 
+export type Outstanding =
+  | { kind: 'permission'; requestId: string; toolName: string; input: unknown; title: string; description: string; canRemember: boolean }
+  | { kind: 'question'; requestId: string; question: string; choices: string[] };
+
 export type AppState = {
   dir: string;
   preview: PreviewState;
@@ -44,6 +48,8 @@ export type AppState = {
   costUsd: number;
   busy: boolean;
   lastError: string | null;
+  /** Prompts still waiting on the user, so a reconnecting UI can show them. */
+  outstanding: Outstanding[];
 };
 
 type TurnRecord = {
@@ -74,6 +80,7 @@ export class App {
   #listeners = new Set<(event: KilnEvent | AppNotice) => void>();
 
   #permissions = new PendingRegistry<PermissionDecision>();
+  #outstanding = new Map<string, Outstanding>();
   #questions = new PendingRegistry<string>();
   #turns: TurnRecord[] = [];
   #busy = false;
@@ -118,6 +125,7 @@ export class App {
       costUsd: this.#cost,
       busy: this.#busy,
       lastError: this.#lastError,
+      outstanding: [...this.#outstanding.values()],
     };
   }
 
@@ -355,6 +363,7 @@ export class App {
 
   async stop(): Promise<void> {
     this.#unhookExit?.();
+    this.#outstanding.clear();
     this.#permissions.clear();
     this.#questions.clear();
     await this.#session?.close().catch(() => {});
@@ -632,17 +641,20 @@ export class App {
     return inspectElement(this.#browser, selector);
   }
 
-  #askUser(question: string, choices: string[]): Promise<string> {
+  async #askUser(question: string, choices: string[]): Promise<string> {
     const id = randomUUID();
+    this.#outstanding.set(id, { kind: 'question', requestId: id, question, choices });
     this.#emit({ kind: 'question', requestId: id, question, choices });
-    return this.#questions.wait(id);
+    const answer = await this.#questions.wait(id);
+    this.#outstanding.delete(id);
+    return answer ?? '(no answer)';
   }
 
-  #askPermission(request: PermissionRequest): Promise<PermissionDecision> {
+  async #askPermission(request: PermissionRequest): Promise<PermissionDecision> {
     if (this.#options.autoApprove || request.toolName.startsWith('mcp__kiln__')) {
       return Promise.resolve({ allow: true, remember: false });
     }
-    this.#emit({
+    const payload: Outstanding = {
       kind: 'permission',
       requestId: request.requestId,
       toolName: request.toolName,
@@ -650,8 +662,13 @@ export class App {
       title: request.title ?? request.toolName,
       description: request.description ?? '',
       canRemember: request.canRemember,
-    });
-    return this.#permissions.wait(request.requestId);
+    };
+    this.#outstanding.set(request.requestId, payload);
+    this.#emit(payload);
+    const decision = await this.#permissions.wait(request.requestId);
+    this.#outstanding.delete(request.requestId);
+    // Nobody answered: say so rather than leaving the turn hanging.
+    return decision ?? { allow: false, reason: 'No one answered this permission request, so it was denied.' };
   }
 }
 

@@ -8,6 +8,10 @@ export type Checkpoint = {
   costUsd: number;
 };
 
+export type Outstanding =
+  | { kind: 'permission'; requestId: string; toolName: string; input: unknown; title: string; description: string; canRemember: boolean }
+  | { kind: 'question'; requestId: string; question: string; choices: string[] };
+
 export type AppState = {
   dir: string;
   preview: { running: boolean; url: string | null; framework: string | null };
@@ -16,6 +20,8 @@ export type AppState = {
   costUsd: number;
   busy: boolean;
   lastError: string | null;
+  /** Prompts still waiting on the user, so a reconnect can show them. */
+  outstanding: Outstanding[];
 };
 
 export type RemoteStatus = {
@@ -70,6 +76,12 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 
 export const api = {
   state: () => fetch('/api/state').then((r) => r.json() as Promise<AppState>),
+
+  outstanding: () =>
+    fetch('/api/outstanding')
+      .then((r) => r.json() as Promise<{ outstanding: Outstanding[] }>)
+      .then((d) => d.outstanding)
+      .catch(() => [] as Outstanding[]),
 
   prompt: (text: string) => post<{ promptUuid: string }>('/api/prompt', { text }),
 

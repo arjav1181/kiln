@@ -19,6 +19,7 @@ const TARGETS: Record<string, string> = {
   hitrate: '11-t0-hitrate.ts',
   editor: '12-click-to-edit.ts',
   inject: '13-provenance-injection.ts',
+  pending: '14-pending-prompt.ts',
 };
 
 const requested = process.argv.slice(2);
