@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { resolve } from 'node:path';
 
 const run = promisify(execFile);
 
@@ -42,6 +43,14 @@ const KNOWN: Array<{ test: RegExp; message: string; fatal: boolean }> = [
       "git does not trust this repository's owner. Run:\n" +
       '  git config --global --add safe.directory <your-project-path>',
     fatal: true,
+  },
+  {
+    test: /index\.lock: File exists|Unable to create .*index\.lock/i,
+    message:
+      'Another git process is using this repository. If nothing is running, a ' +
+      'previous one was interrupted; remove the stale lock file:\n' +
+      '  rm <project>/.git/index.lock',
+    fatal: false,
   },
   {
     test: /does not appear to be a git repository/i,
@@ -103,11 +112,18 @@ export class History {
 
   async init(): Promise<void> {
     if (this.#ready) return;
-    try {
-      await git(['rev-parse', '--git-dir'], this.dir);
-    } catch {
+
+    // Kiln gives each project its own repository. Adopting whatever repo
+    // happens to sit above the directory is surprising: it would commit the app
+    // into someone else's history, and that repo's .gitignore would then decide
+    // what Kiln is allowed to track.
+    const root = (await git(['rev-parse', '--show-toplevel'], this.dir).catch(() => '')).trim();
+    const isRepoRoot = root !== '' && resolve(root) === resolve(this.dir);
+
+    if (!isRepoRoot) {
       await git(['init', '-q'], this.dir);
     }
+
     await this.ensureIdentity();
 
     // `rev-parse HEAD` fails on an unborn branch, which is every fresh project.
