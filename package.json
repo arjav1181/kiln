@@ -1,6 +1,6 @@
 {
   "name": "@aj1181/kiln",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "A Lovable-grade product shell for terminal coding agents. One command turns an empty directory into a running app you can look at.",
   "license": "MIT",
   "type": "module",

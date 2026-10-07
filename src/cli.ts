@@ -18,6 +18,7 @@ kiln — a Lovable-grade shell for terminal coding agents
   --no-open         do not open a browser
   --headless        run without the capture browser
   --auto-approve    allow every tool the agent asks for (unsafe)
+  --verbose, -v     stream every event, tool call and result to the terminal
   --help            show this
 
 Start from an empty directory and the first turn scaffolds the app.
@@ -31,6 +32,7 @@ type Options = {
   open: boolean;
   headless: boolean;
   autoApprove: boolean;
+  verbose: boolean;
   help: boolean;
 };
 
@@ -41,6 +43,7 @@ function parse(argv: string[]): Options {
     open: true,
     headless: false,
     autoApprove: false,
+    verbose: false,
     help: false,
   };
 
@@ -54,6 +57,7 @@ function parse(argv: string[]): Options {
     else if (arg === '--no-open') options.open = false;
     else if (arg === '--headless') options.headless = true;
     else if (arg === '--auto-approve') options.autoApprove = true;
+    else if (arg === '--verbose' || arg === '-v') options.verbose = true;
     else if (arg.startsWith('-')) throw new Error(`Unknown option ${arg}`);
     else options.dir = resolve(arg);
   }
@@ -82,6 +86,102 @@ async function ensureKilnDir(dir: string): Promise<void> {
   }
 }
 
+const DIM = '\x1b[2m';
+const CYAN = '\x1b[36m';
+const GREY = '\x1b[90m';
+const RED = '\x1b[31m';
+const GREEN = '\x1b[32m';
+const RESET = '\x1b[0m';
+
+const stamp = () => new Date().toLocaleTimeString('en-GB', { hour12: false });
+
+function line(colour: string, kind: string, text = '') {
+  process.stdout.write(`${DIM}${stamp()}${RESET} ${colour}${kind.padEnd(16)}${RESET} ${text}\n`);
+}
+
+/**
+ * Mirrors the daemon onto the terminal. The browser shows the same events, but
+ * a terminal session should not need one to see what the agent is doing.
+ */
+function attachVerboseStream(app: App): void {
+  app.subscribe((event) => {
+    const e = event as Record<string, unknown> & { kind: string };
+    switch (e.kind) {
+      case 'turn.start':
+        line(CYAN, 'turn', `started ${String(e.turnId).slice(0, 8)}`);
+        break;
+      case 'text':
+        process.stdout.write(String(e.delta));
+        break;
+      case 'thinking':
+        line(DIM, 'thinking', truncate(String(e.delta), 100));
+        break;
+      case 'tool.start':
+        line(GREY, 'tool', `${String(e.name)} ${truncate(JSON.stringify(e.input ?? {}), 160)}`);
+        break;
+      case 'tool.result':
+        line(e.isError ? RED : GREY, e.isError ? 'tool failed' : 'tool ok', truncate(String(e.output ?? ''), 160));
+        break;
+      case 'turn.end':
+        process.stdout.write('\n');
+        line(CYAN, 'turn end', `${String(e.stopReason)} · $${Number(e.costUsd).toFixed(4)}`);
+        break;
+      case 'turn.done': {
+        const files = (e.files as string[]) ?? [];
+        line(GREEN, 'checkpoint', `${String(e.checkpointId ?? 'none').slice(0, 8)} · ${files.length} files`);
+        break;
+      }
+      case 'turn.retrying':
+        line(RED, 'retrying', String(e.reason));
+        break;
+      case 'permission':
+        line(RED, 'permission', `${String(e.title)} — answer it in the browser`);
+        break;
+      case 'question':
+        line(RED, 'question', String(e.question));
+        break;
+      case 'server.log':
+        line(DIM, 'server', String(e.line));
+        break;
+      case 'preview':
+        line(GREEN, 'preview', `${String(e.url)} (${String(e.framework)})`);
+        break;
+      case 'preview.captured':
+        line(GREEN, 'screenshot', String(e.reason));
+        break;
+      case 'preview.skipped':
+        line(DIM, 'screenshot skipped', String(e.reason));
+        break;
+      case 'preview.log':
+        line(RED, 'page error', String(e.text));
+        break;
+      case 'deps.starting':
+        line(GREY, 'install', `${String(e.manager)} dependencies`);
+        break;
+      case 'deps.done':
+        line(e.ok ? GREEN : RED, e.ok ? 'installed' : 'install failed', String(e.detail ?? ''));
+        break;
+      case 'history.disabled':
+        line(RED, 'history off', String(e.reason));
+        break;
+      case 'session.ready':
+        line(DIM, 'session', String(e.sessionId));
+        break;
+      case 'busy':
+        if (e.busy) line(CYAN, 'working', '');
+        break;
+      case 'fatal':
+        line(RED, 'fatal', String(e.message));
+        break;
+    }
+  });
+}
+
+const truncate = (text: string, max: number): string => {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+};
+
 function hasCredentials(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
 }
@@ -106,6 +206,8 @@ async function main(): Promise<void> {
 
   await app.start();
   if (options.dev) await app.setDevCommand(options.dev);
+
+  if (options.verbose) attachVerboseStream(app);
 
   const daemon = createDaemon(app);
   const handle = await daemon.listen(options.port);
